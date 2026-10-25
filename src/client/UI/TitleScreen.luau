@@ -33,9 +33,10 @@ TitleScreen.DESKTOP_WORD_RESERVE = 440.0
 --- The wordmark is at most this share of the screen's width: the width the old name had ("ROWORLD",
 --- since 2026-10-25, is wider than "ROFRONT" and reached under the Arsenal and crate buttons, top right).
 TitleScreen.WORD_MAX_W = 0.35
---- The credits line under the dock (desktop, phones).
+--- The credits line under the dock (desktop, phones). It points at the help window by its top-bar name
+--- (2026-10-25: "See Help & Credits" instead of "see How to play").
 TitleScreen.CREDITS = "© OpenFront and Contributors  ·  Maps, flags and unit art from OpenFront (CC BY-SA 4.0)  ·  "
-	.. "Music by Rodrigo Flores  ·  GNU AGPL v3, no warranty: see How to play"
+	.. "Music by Rodrigo Flores  ·  GNU AGPL v3, no warranty: See Help & Credits"
 TitleScreen.CREDITS_SHORT = "© OpenFront and Contributors  ·  Maps & art: OpenFront (CC BY-SA 4.0)  ·  "
 	.. "Music: Rodrigo Flores  ·  GNU AGPL v3"
 
