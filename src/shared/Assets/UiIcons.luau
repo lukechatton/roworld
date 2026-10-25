@@ -21,6 +21,7 @@ return {
 	exit = "rbxassetid://99233908431291",
 	eye = "rbxassetid://93906928006817",
 	factory = "rbxassetid://125041521569328",
+	github = "rbxassetid://91110768437503",
 	globe = "rbxassetid://120582088853438",
 	gold = "rbxassetid://126417721337487",
 	help = "rbxassetid://112222144930714",

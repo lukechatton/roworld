@@ -257,6 +257,10 @@ HelpOverlay.LEGAL = {
 	"Maps, country flags and unit art from OpenFront, licensed CC BY-SA 4.0; the versions converted or adapted for RoWorld are shared under the same licence. Music by Rodrigo Flores.",
 	"RoWorld is not affiliated with or endorsed by OpenFront.",
 }
+--- Where the source lives, under the credits: plain text with the GitHub mark, since Roblox games
+--- can't link off-platform (2026-10-25: "Source <github logo> <repo>" at the bottom; the public repo is
+--- lukechatton/roworld, lukechatton/rofront is private).
+HelpOverlay.SOURCE_REPO = "lukechatton/roworld"
 
 -- Roblox: Esc opens Roblox's own menu (games never receive it), so cancel is X or right-click;
 -- Backspace (retreat) and WASD / +- are Roblox-port keys the original's list didn't show (review P2-4).
@@ -415,6 +419,7 @@ function HelpOverlay._build(self)
 	end
 	body:add_child(self:_controls())
 	body:add_child(self:_legal())
+	body:add_child(self:_source())
 end
 
 local function card_panel(mh: number, mv: number)
@@ -547,6 +552,22 @@ function HelpOverlay._legal(self)
 		v:add_child(t)
 	end
 	return card
+end
+
+--- "Source  <GitHub mark>  lukechatton/roworld", centred below the credits card.
+function HelpOverlay._source(self)
+	local row = UITheme.hbox(8)
+	row.size_flags_horizontal = W.SHRINK_CENTER
+	local cap = UITheme.label("Source", 13, 500, UITheme.TEXT_3)
+	cap.size_flags_vertical = W.SHRINK_CENTER
+	row:add_child(cap)
+	local ic = UITheme.icon_rect("github", 18.0, UITheme.TEXT_2)
+	ic.size_flags_vertical = W.SHRINK_CENTER
+	row:add_child(ic)
+	local repo = UITheme.label(HelpOverlay.SOURCE_REPO, 13, 700, UITheme.TEXT)
+	repo.size_flags_vertical = W.SHRINK_CENTER
+	row:add_child(repo)
+	return row
 end
 
 --- Key cap: StyleBoxFlat(white 0.09, r 6, border white 0.2, 1 px, 2 px bottom border).
