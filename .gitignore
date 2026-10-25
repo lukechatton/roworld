@@ -1,0 +1,8 @@
+.venv/
+.bin/
+.secrets/
+build/
+*.rbxl.lock
+__pycache__/
+assets/audio/
+.claude/worktrees/

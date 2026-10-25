@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- a chest: a lid, a thin gap, the body with a keyhole cut out (white mask; tinted in game) -->
+  <path fill="#fff" d="M9 12 h46 a4 4 0 0 1 4 4 v9 h-54 v-9 a4 4 0 0 1 4 -4 z"/>
+  <path fill="#fff" fill-rule="evenodd" d="
+    M5 29 h54 v19 a5 5 0 0 1 -5 5 h-44 a5 5 0 0 1 -5 -5 z
+    M27.6 37.4 a4.4 4.4 0 1 1 7.2 3.4 l1.3 6.6 h-8.2 l1.3 -6.6 a4.4 4.4 0 0 1 -1.6 -3.4 z"/>
+</svg>

@@ -1,0 +1,126 @@
+{
+  "anchor": {
+    "prod": 3721239331,
+    "staging": 3721222601
+  },
+  "astronaut": {
+    "prod": 3721239381,
+    "staging": 3721222658
+  },
+  "bat_moon": {
+    "prod": 3721239088,
+    "staging": 3721222343
+  },
+  "big_red_button": {
+    "prod": 3721239298,
+    "staging": 3721222570
+  },
+  "capybara": {
+    "prod": 3721239471,
+    "staging": 3721222748
+  },
+  "cat": {
+    "prod": 3721239457,
+    "staging": 3721222734
+  },
+  "cauldron": {
+    "prod": 3721239121,
+    "staging": 3721222395
+  },
+  "comet": {
+    "prod": 3721239431,
+    "staging": 3721222717
+  },
+  "dragon_dynasty": {
+    "prod": 3721239205,
+    "staging": 3721222482
+  },
+  "frost_crown": {
+    "prod": 3721239551,
+    "staging": 3721222830
+  },
+  "grinning_skull": {
+    "prod": 3721239105,
+    "staging": 3721222372
+  },
+  "jolly_roger": {
+    "prod": 3721239349,
+    "staging": 3721222621
+  },
+  "kraken": {
+    "prod": 3721239322,
+    "staging": 3721222581
+  },
+  "lighthouse": {
+    "prod": 3721239370,
+    "staging": 3721222638
+  },
+  "lion_crest": {
+    "prod": 3721239164,
+    "staging": 3721222444
+  },
+  "mirv_storm": {
+    "prod": 3721239282,
+    "staging": 3721222545
+  },
+  "phantom": {
+    "prod": 3721239133,
+    "staging": 3721222412
+  },
+  "phoenix": {
+    "prod": 3721239227,
+    "staging": 3721222487
+  },
+  "pizza": {
+    "prod": 3721239505,
+    "staging": 3721222775
+  },
+  "pumpkin_king": {
+    "prod": 3721239073,
+    "staging": 3721222328
+  },
+  "radioactive": {
+    "prod": 3721239247,
+    "staging": 3721222513
+  },
+  "ringed_planet": {
+    "prod": 3721239411,
+    "staging": 3721222694
+  },
+  "rocket": {
+    "prod": 3721239394,
+    "staging": 3721222676
+  },
+  "rubber_duck": {
+    "prod": 3721239484,
+    "staging": 3721222764
+  },
+  "set:halloween": {
+    "prod": 3721945429,
+    "staging": 3721899774
+  },
+  "spider_web": {
+    "prod": 3721239150,
+    "staging": 3721222435
+  },
+  "thunder": {
+    "prod": 3721239539,
+    "staging": 3721222813
+  },
+  "tornado": {
+    "prod": 3721239564,
+    "staging": 3721222856
+  },
+  "volcano": {
+    "prod": 3721239520,
+    "staging": 3721222791
+  },
+  "warhead": {
+    "prod": 3721239266,
+    "staging": 3721222524
+  },
+  "wolf_pack": {
+    "prod": 3721239180,
+    "staging": 3721222463
+  }
+}

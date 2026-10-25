@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 16 light rays from the centre, fading out (white; tinted and spun in game) -->
+  <defs>
+    <radialGradient id="fade" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="0.35" stop-color="#fff" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="m"><rect width="512" height="512" fill="url(#fade)"/></mask>
+  </defs>
+  <g mask="url(#m)" fill="#fff">
+    <path d="M256 256 L236 0 L276 0 Z"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(22.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(45 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(67.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(90 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(112.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(135 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(157.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(180 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(202.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(225 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(247.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(270 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(292.5 256 256)"/>
+    <path d="M256 256 L236 0 L276 0 Z" transform="rotate(315 256 256)"/><path d="M256 256 L236 0 L276 0 Z" transform="rotate(337.5 256 256)"/>
+  </g>
+</svg>

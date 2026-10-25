@@ -1,0 +1,9 @@
+#!/bin/zsh
+# Usage: tools/globe/st <studio.py args...>   |   tools/globe/st sync [--full]
+# Targets exactly the Studio instance named $GLOBE_PLACE (default "globe.rbxl") (STUDIO_MATCH would also match
+# e.g. "rofront-globe.rbxl").
+cd "${0:A:h}/../.."
+id=$(.venv/bin/python tools/studio.py list | .venv/bin/python -c 'import json,sys,os; d=json.load(sys.stdin); print(next(s["id"] for s in d["studios"] if s["name"]==os.environ.get("GLOBE_PLACE","globe.rbxl")))')
+if [ -z "$id" ]; then echo "globe place not open" >&2; exit 3; fi
+if [ "$1" = "sync" ]; then shift; STUDIO_ID=$id exec .venv/bin/python tools/sync.py "$@"; fi
+STUDIO_ID=$id exec .venv/bin/python tools/studio.py "$@"

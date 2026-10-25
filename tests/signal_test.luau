@@ -1,0 +1,26 @@
+require("./prelude")
+local Signal = require("../src/shared/Core/Signal")
+local s = Signal.new()
+local got = {}
+local c1 = s:Connect(function(x)
+	table.insert(got, "a" .. x)
+end)
+s:Once(function(x)
+	table.insert(got, "o" .. x)
+end)
+s:Fire(1)
+c1:Disconnect()
+s:Fire(2)
+assert(table.concat(got, ",") == "a1,o1", table.concat(got, ","))
+-- a failing handler must not stop its siblings
+local s2 = Signal.new()
+local after = false
+s2:Connect(function()
+	error("boom")
+end)
+s2:Connect(function()
+	after = true
+end)
+s2:Fire()
+assert(after, "second handler must still run after the first errors")
+print("signal_test ok")
