@@ -1062,6 +1062,11 @@ function Control.get_global_position(self): Vector2
 	while n ~= nil and not n._is_root do
 		p += n.position
 		n = n.parent
+		-- a scrolled container draws its children shifted by the scroll (HelpOverlay.Scroll): without
+		-- it a hint anchored inside the help window sat where the content would be unscrolled
+		if n ~= nil and n._canvas_offset ~= nil then
+			p -= n:_canvas_offset()
+		end
 	end
 	return p
 end

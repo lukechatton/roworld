@@ -166,6 +166,11 @@ function Scroll._sort_children(self)
 	(self.gui :: ScrollingFrame).CanvasSize = UDim2.fromOffset(0, math.floor(h * UITheme.scale + 0.5))
 end
 
+--- How far the content is scrolled, in logical px (Control.get_global_position subtracts it).
+function Scroll._canvas_offset(self): Vector2
+	return (self.gui :: ScrollingFrame).CanvasPosition / UITheme.scale
+end
+
 function Scroll.scroll_by(self, px: number)
 	local g = self.gui :: ScrollingFrame
 	local s = UITheme.scale
@@ -261,6 +266,12 @@ HelpOverlay.LEGAL = {
 --- can't link off-platform (2026-10-25: "Source <github logo> <repo>" at the bottom; the public repo is
 --- lukechatton/roworld, lukechatton/rofront is private).
 HelpOverlay.SOURCE_REPO = "lukechatton/roworld"
+--- The card that pops up over the repo name when it's pressed (2026-10-25), and how long it stays.
+HelpOverlay.SOURCE_TIP = {
+	title = "Source code",
+	body = "Source available on the github website under " .. HelpOverlay.SOURCE_REPO,
+}
+HelpOverlay.SOURCE_TIP_S = 4.0
 
 -- Roblox: Esc opens Roblox's own menu (games never receive it), so cancel is X or right-click;
 -- Backspace (retreat) and WASD / +- are Roblox-port keys the original's list didn't show (review P2-4).
@@ -317,6 +328,20 @@ function HelpOverlay.new(c: any)
 	self:set_anchors_and_offsets_preset(W.PRESET_FULL_RECT)
 	self:set_mouse_filter(W.MOUSE_STOP)
 	self:set_visible(false)
+	-- Input sink (Godot mouse_filter STOP while open; RadialMenu's Blocker): Active frames don't stop a
+	-- click reaching a button behind them, only a button on top does (2026-10-25: a click on the window
+	-- pressed the title's Play Solo / JOIN underneath). Under the dim and the window (kit children are
+	-- ZIndex 11+), so the dim still sees presses outside the window.
+	UICtx.make("TextButton", {
+		Name = "Blocker",
+		BackgroundTransparency = 1,
+		Text = "",
+		AutoButtonColor = false,
+		Size = UDim2.fromScale(1, 1),
+		Active = true,
+		Selectable = false,
+		ZIndex = 1,
+	}, self.gui)
 	self._dim = W.ColorRect.new(UITheme.rgba(0.01, 0.015, 0.05, 0.72))
 	self._dim:set_anchors_and_offsets_preset(W.PRESET_FULL_RECT)
 	self._dim:set_mouse_filter(W.MOUSE_STOP)
@@ -554,20 +579,36 @@ function HelpOverlay._legal(self)
 	return card
 end
 
---- "Source  <GitHub mark>  lukechatton/roworld", centred below the credits card.
+--- "Source  [<GitHub mark> lukechatton/roworld]", centred below the credits card. Games can't open web
+--- links, so pressing the repo name pops up where to find it instead (SOURCE_TIP).
 function HelpOverlay._source(self)
-	local row = UITheme.hbox(8)
+	local row = UITheme.hbox(4)
 	row.size_flags_horizontal = W.SHRINK_CENTER
 	local cap = UITheme.label("Source", 13, 500, UITheme.TEXT_3)
 	cap.size_flags_vertical = W.SHRINK_CENTER
 	row:add_child(cap)
-	local ic = UITheme.icon_rect("github", 18.0, UITheme.TEXT_2)
-	ic.size_flags_vertical = W.SHRINK_CENTER
-	row:add_child(ic)
-	local repo = UITheme.label(HelpOverlay.SOURCE_REPO, 13, 700, UITheme.TEXT)
-	repo.size_flags_vertical = W.SHRINK_CENTER
-	row:add_child(repo)
+	local b = UITheme.button(HelpOverlay.SOURCE_REPO, "GhostButton", "github", 40.0)
+	b:set_font_size(13)
+	b:add_theme_constant_override("icon_max_width", 18)
+	b.size_flags_vertical = W.SHRINK_CENTER
+	b.pressed:Connect(function()
+		self:_show_source_tip(b)
+	end)
+	row:add_child(b)
 	return row
+end
+
+--- The tooltip card above the repo name (forced, so taps show it too); it hides after SOURCE_TIP_S,
+--- or with the window (the card drops an anchor that is no longer visible).
+function HelpOverlay._show_source_tip(self, b: any)
+	self.ctx:show_hint(b, HelpOverlay.SOURCE_TIP, true)
+	self._tip_serial = (self._tip_serial or 0) + 1
+	local serial = self._tip_serial
+	task.delay(HelpOverlay.SOURCE_TIP_S, function()
+		if self._tip_serial == serial then
+			self.ctx:hide_hint(b)
+		end
+	end)
 end
 
 --- Key cap: StyleBoxFlat(white 0.09, r 6, border white 0.2, 1 px, 2 px bottom border).
