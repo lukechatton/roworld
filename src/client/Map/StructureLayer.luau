@@ -1,12 +1,13 @@
 --!native
 -- Structure icons on the 2D map:
---   * a plate per structure in its type's shape (City circle, Port pentagon, Factory hexagon,
---     Defense Post octagon, SAM square, Silo triangle), fill = the owner's territory colour at HSV
---     value x0.65, rim = the border colour (the territory colour for the local player) at value
---     x0.1, a white glyph inside; under construction: grey fill 198 / rim 127;
+--   * a plate per structure in its kind's shape (Assets/MapSprites: City squircle, Port disc, Factory
+--     cog, Defense Post shield, SAM Launcher dome, Missile Silo bullet, Artillery diamond, Airfield
+--     runway, Railgun hexagon), fill = the owner's territory colour at HSV value x0.65, rim = the
+--     border colour (the territory colour for the local player) at value x0.1, a white glyph inside;
+--     under construction: grey fill 198 / rim 127;
 --   * size: ICON_SIZE * iconScale px, iconScale = DOT_SCALE (0.3, no glyph)
 --     when zoom <= DOTS_ZOOM, zoom / GROW_ZOOM above GROW_ZOOM, else
---     min(1, zoom / SCALE_FACTOR_OUT); per-type shape scale; zoom = the camera zoom
+--     min(1, zoom / SCALE_FACTOR_OUT); per-kind shape scale; zoom = the camera zoom
 --     (device px per full-size tile; a tile is k_lin full-size tiles, a GUI px DEVICE_RATIO
 --     device px);
 --   * level >= 2: the level number above the plate (0.4 plate sizes up);
@@ -19,23 +20,11 @@
 -- tenth of the value). It was a Frame holding a rim image, a fill image, the glyph and a level
 -- label, five objects for each of a late game's 500 structures, all laid out again on every camera
 -- move (2026-10-08, docs/performance.md). The level label is made when a structure has a level to
--- show. The Arsenal's plates, and every plate while shapes_one has not loaded, keep a second image
--- for the fill.
+-- show. While shapes_one has not loaded, every plate keeps a second image for the fill.
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Rules = require(Airfront:WaitForChild("Core"):WaitForChild("Rules")) :: any
 local Sprites = require(Airfront:WaitForChild("Assets"):WaitForChild("MapSprites")) :: any
---- The Arsenal's structures (kinds 6..8: Artillery, Airfield, Railgun) have plates and glyphs of
---- their own (Assets/ArsenalArt, the same layout in columns 0..2).
-local AA: any = (function()
-	local m = Airfront.Assets:FindFirstChild("ArsenalArt")
-	local ok, a = pcall(function()
-		return if m then require(m) :: any else nil
-	end)
-	return if ok and type(a) == "table" then a else nil
-end)()
-local ARSENAL_KIND0 = 6
-
 --- Sprites.shapes_one is used once it is known to have loaded (an image still in moderation would leave
 --- every plate invisible).
 local ONE: any = Sprites.shapes_one
@@ -56,9 +45,10 @@ StructureLayer.DOTS_ZOOM = 1.2
 StructureLayer.DOT_SCALE = 0.3
 StructureLayer.SCALE_FACTOR_OUT = 3.0
 StructureLayer.GROW_ZOOM = 7.0
---- per structure kind (Defs.S_*, 0-based) — index with kind + 1
-StructureLayer.SHAPE_SCALE = { 1.0, 1.08, 1.08, 1.0, 1.4, 1.55 }
-StructureLayer.ICON_FILL = { 0.85, 0.85, 0.85, 0.8, 1.0, 0.85 }
+--- per structure kind (Defs.S_*, 0-based) — index with kind + 1: the plate's size (x ICON_SIZE) and
+--- the share of it the glyph spans (ICON_FILL / SHAPE_SCALE of the plate), set with the art
+StructureLayer.SHAPE_SCALE = table.clone(Sprites.shape_scale)
+StructureLayer.ICON_FILL = table.clone(Sprites.icon_fill)
 StructureLayer.FILL_V = 0.65
 StructureLayer.BORDER_V = 0.1
 StructureLayer.BORDER_DARKEN = 0.125
@@ -81,10 +71,6 @@ StructureLayer.BAR_COLORS = {
 StructureLayer.BAR_MIN_PX = 10
 local SHAPE_SCALE = StructureLayer.SHAPE_SCALE
 local ICON_FILL = StructureLayer.ICON_FILL
-for i = 1, 3 do
-	SHAPE_SCALE[ARSENAL_KIND0 + i] = if AA then AA.shape_scale[i] else 1.3
-	ICON_FILL[ARSENAL_KIND0 + i] = if AA then AA.icon_fill[i] else 0.8
-end
 
 type Plate = {
 	--- the plate: the whole shape (rim and fill in one image, or the rim alone under `fill`)
@@ -290,9 +276,8 @@ end
 function StructureLayer._style(self: any, p: Plate, s: any, building: boolean)
 	local st = self._state
 	local k = s.kind
-	local arsenal = k >= ARSENAL_KIND0 and AA ~= nil
-	-- one image for the plate where there is one (see the header)
-	local one = one_ready and not arsenal
+	-- one image for the plate once it has loaded (see the header)
+	local one = one_ready
 	-- (a number, not a string: built for every plate on screen at every camera move, and a phone pays
 	-- for the strings it made; 2026-10-12)
 	local key = (((k * 1024 + s.owner) * 2 + (if building then 1 else 0)) * 4096 + math.min(s.level or 1, 4095)) * 2
@@ -302,9 +287,6 @@ function StructureLayer._style(self: any, p: Plate, s: any, building: boolean)
 	end
 	p.state_key = key
 	local shapes, icons, col = Sprites.shapes, Sprites.icons, k
-	if arsenal then
-		shapes, icons, col = AA.shapes, AA.glyphs, k - ARSENAL_KIND0
-	end
 	local fill_col, rim_col
 	if building then
 		fill_col, rim_col = StructureLayer.CONSTRUCT_FILL, StructureLayer.CONSTRUCT_BORDER

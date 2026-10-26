@@ -1,8 +1,1 @@
-<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150" width="150" height="150">
-	<defs>
-		<image  width="136" height="86" id="img1" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIgAAABWCAMAAAAjUC4/AAAAAXNSR0IB2cksfwAAAFFQTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwcOACZU////4QAPEwQDAwkRFwUEACZVAAAAAAAAAAAASSUfPAAAABt0Uk5TAAENE33U334X8//yDzkmOv//////////GfYRaC+kLgAAAJdJREFUeJzt2r0KwmAMhtHGliqIdPX+71AQof7wqRVxdZEEOc+c4UDWN7qI6LJrrUX0FSCrOTYFHN3zLbtbNmJpiOmSbVh6Qcbvv/OTy9Mbsr2mQvojCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICMhfQcb1ORPymQgWaKgzI93HIRvxaIo6U+Mq4+s7oOn23YbpTf8AAAAASUVORK5CYII="/>
-	</defs>
-	<style>
-	</style>
-	<use id="img1" href="#img1" x="7" y="32"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600"><path fill="#CE1126" d="M0 0h900v600H0"/><path fill="#fff" d="M0 0h600v600H0"/><path fill="#002654" d="M0 0h300v600H0"/></svg>

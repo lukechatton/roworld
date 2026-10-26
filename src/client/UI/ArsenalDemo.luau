@@ -496,11 +496,14 @@ function ArsenalDemo._advance(self, from: number, to: number, push: number): num
 	return ((bx - p.map_rect.X) / p.map_rw * (W + 2 * pad) - pad) / W
 end
 
---- A structure's plate (the map sprites' or the Arsenal's, as Map/StructureLayer draws it: the whole
---- shape in the rim's colour, the inset shape over it in `fill`, the glyph in white), `d` px wide.
+--- A structure's plate (as Map/StructureLayer draws it: the whole shape in the rim's colour, the inset
+--- shape over it in `fill`, the glyph in white), `d` px wide. `col`: the structure kind, counted from
+--- the Arsenal's first (Defs.S_ARTILLERY) when `arsenal`.
 function ArsenalDemo._plate(self, name: string, col: number, arsenal: boolean, fill: Color3, d: number): ImageLabel
-	local shapes = if arsenal then AA.shapes else Sprites.shapes
-	local icons = if arsenal then AA.glyphs else Sprites.icons
+	local shapes, icons = Sprites.shapes, Sprites.icons
+	if arsenal then
+		col += 6
+	end
 	local cell = shapes.cell
 	local plate = new("ImageLabel", {
 		Name = name,

@@ -1386,6 +1386,20 @@ function UITheme.icon(icon_name: string): string?
 					end
 				end
 			end
+			-- the structures' and units' glyphs as the map draws them (Assets/MapSprites.ui: city, port,
+			-- warship, atom...), over the ones above, so the build bar and the menus show what the map
+			-- shows (2026-10-25)
+			local ok3, s = pcall(function()
+				local rs = game:GetService("ReplicatedStorage")
+				local assets = (rs:WaitForChild("Airfront") :: any):FindFirstChild("Assets")
+				local mod = assets and assets:FindFirstChild("MapSprites")
+				return if mod then require(mod) :: any else nil
+			end)
+			if ok3 and type(s) == "table" and type(s.ui) == "table" then
+				for k, v in s.ui do
+					_icons[k] = v
+				end
+			end
 		else
 			local ok, m = pcall(function()
 				return (require :: any)("../../shared/Assets/UiIcons")

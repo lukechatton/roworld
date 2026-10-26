@@ -15,10 +15,10 @@
 -- above the tile, rises 3 tiles a second and fades out over 1.5 s (font 6 tiles). It keeps a minimum
 -- size on screen and is not drawn on a map zoomed far out (and is never bigger than
 -- 40 px).
--- Explosions (sprites from the fx atlas; added 2026-10-04 for a destroyed defense post and for a
+-- Explosions (Assets/MapFx; added 2026-10-04 for a destroyed defense post and for a
 -- nuke shot down by a SAM): a
--- destroyed defense post or Arsenal structure plays BuildingExplosion over a small ring, a nuke shot
--- down plays SAMExplosion where it was. They are seen, not heard (shots and hits were made silent
+-- destroyed defense post or Arsenal structure plays `building` over a small ring, a nuke shot
+-- down plays `sam` where it was. They are seen, not heard (shots and hits were made silent
 -- on 2026-09-27: together they were a constant racket).
 -- Nukes (since
 -- 2026-10-12; the trailer's hydrogen bombs fell flat when a ring and a green stain were all
@@ -32,10 +32,8 @@ local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Defs = require(Airfront:WaitForChild("Core"):WaitForChild("Defs")) :: any
 local Rules = require(Airfront:WaitForChild("Core"):WaitForChild("Rules")) :: any
-local Sprites = require(Airfront:WaitForChild("Assets"):WaitForChild("MapSprites")) :: any
--- Sprites drawn for Rofront (tools/assets/make_map_fx.py; 2026-10-25: new art for the nuke
--- explosion and the territory claim): the nuke's explosion and the
--- conquest's flag. The other explosions and the debris come from the fx atlas (Assets/MapSprites).
+-- Every sprite here is drawn for Rofront, rows of one atlas (tools/assets/make_map_fx.py; 2026-10-25:
+-- all new art): the explosions, the debris a nuke leaves and the conquest's flag.
 local MapFx = require(Airfront:WaitForChild("Assets"):WaitForChild("MapFx")) :: any
 local FrameClock = require(script.Parent:WaitForChild("FrameClock")) :: any
 
@@ -77,28 +75,31 @@ FxLayer.BONUS_MIN_PX = 13
 FxLayer.BONUS_MAX_PX = 40
 FxLayer.BONUS_CULL_ZOOM = 0.3
 FxLayer.BONUS_MAX = 48
---- The explosion sprites: the atlas row's y, a frame's size, how many frames and how long each shows,
---- how wide it is drawn (full-size tiles) and the least it is drawn on screen (px); `image` and `x`: an
---- atlas other than the fx one (Sprites), and where the row starts in it.
---- (`loop`: the debris, which cycle until their lifetime ends; the atlas's rows 6 to 9)
+--- The explosion sprites, rows of Assets/MapFx: where the row starts in the atlas (x, y), a frame's
+--- size, how many frames and how long each shows, how wide it is drawn (full-size tiles) and the least
+--- it is drawn on screen (px). (`loop`: the debris, which cycle until their lifetime ends)
+local function fx_row(name: string, frame_s: number, world: number, min_px: number, loop: boolean?)
+	local r = MapFx[name]
+	return {
+		x = r.x,
+		y = r.y,
+		w = r.w,
+		h = r.h,
+		frames = r.frames,
+		frame_s = frame_s,
+		world = world,
+		min_px = min_px,
+		loop = loop,
+	}
+end
 FxLayer.BURSTS = {
-	building = { y = 98, w = 17, h = 15, frames = 10, frame_s = 0.07, world = 18, min_px = 32 },
-	sam = { y = 60, w = 48, h = 38, frames = 9, frame_s = 0.08, world = 40, min_px = 60 },
-	nuke = {
-		image = MapFx.id,
-		x = MapFx.nuke.x,
-		y = MapFx.nuke.y,
-		w = MapFx.nuke.w,
-		h = MapFx.nuke.h,
-		frames = MapFx.nuke.frames,
-		frame_s = 0.07,
-		world = 60,
-		min_px = 36,
-	},
-	fire = { y = 158, w = 7, h = 13, frames = 6, frame_s = 0.1, world = 7, min_px = 4, loop = true },
-	smoke = { y = 171, w = 11, h = 12, frames = 4, frame_s = 0.12, world = 11, min_px = 6, loop = true },
-	big_smoke = { y = 183, w = 24, h = 16, frames = 5, frame_s = 0.12, world = 24, min_px = 12, loop = true },
-	smoke_fire = { y = 199, w = 24, h = 16, frames = 5, frame_s = 0.12, world = 24, min_px = 12, loop = true },
+	building = fx_row("building", 0.07, 18, 32),
+	sam = fx_row("sam", 0.08, 40, 60),
+	nuke = fx_row("nuke", 0.07, 60, 36),
+	fire = fx_row("fire", 0.1, 7, 4, true),
+	smoke = fx_row("smoke", 0.12, 11, 6, true),
+	big_smoke = fx_row("big_smoke", 0.12, 24, 12, true),
+	smoke_fire = fx_row("smoke_fire", 0.12, 24, 12, true),
 }
 --- A nuke's look by Defs.N_* (full-size tiles): 70 for an atom bomb, 160 for a hydrogen bomb, 70 a
 --- MIRV warhead; the Arsenal's Mega Nuke (a blast between the two) 120, a Scatter
@@ -157,10 +158,10 @@ function FxLayer.new(parent: Instance, view: any)
 	self._warheads_counted = -1.0
 	self._bonus = {} :: { Bonus }
 	self._bonus_gui = {} :: { BonusGui }
-	-- Fetch the fx atlases now: a cold download outlasts the 2.5 s conquest popup.
+	-- Fetch the atlas now: a cold download outlasts the 2.5 s conquest popup.
 	task.spawn(function()
 		pcall(function()
-			ContentProvider:PreloadAsync({ Sprites.fx.id, MapFx.id })
+			ContentProvider:PreloadAsync({ MapFx.id })
 		end)
 	end)
 	return self
@@ -654,14 +655,11 @@ local function bursts_step(self: any, cam: any, now: number, list: { Burst }, po
 			g.Name = "Explosion"
 			g.BackgroundTransparency = 1
 			g.AnchorPoint = Vector2.new(0.5, 0.5)
+			g.Image = MapFx.id
 			g.ResampleMode = Enum.ResamplerMode.Pixelated
 			g.ZIndex = z
 			g.Parent = self.root
 			pool[n] = g
-		end
-		local image = row.image or Sprites.fx.id
-		if g.Image ~= image then
-			g.Image = image
 		end
 		g.Visible = true
 		g.Position = UDim2.fromOffset(x, y)

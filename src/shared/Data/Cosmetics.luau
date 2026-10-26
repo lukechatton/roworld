@@ -6,7 +6,7 @@
 --           secondary tiles; mask pixels are 2^scale tiles wide). '#' = the secondary colour: your
 --           own colour lightened (tone > 0) or darkened (tone < 0), or a fixed `accent` colour
 --           (legendary skins). Original designs.
---   flags   country flags (Assets/Flags, CC BY-SA 4.0), shown by your
+--   flags   country flags (Assets/Flags, public domain from Wikimedia Commons), shown by your
 --           name on the map and the leaderboard. Every flag is Common.
 --   exclusive skins (exclusive_skins) are made for particular players: several colours, never in a
 --           crate (Cosmetics.all() is the crate catalog; Cosmetics.exclusives() these).

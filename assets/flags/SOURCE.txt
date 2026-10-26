@@ -1,3 +1,285 @@
-Country flags from OpenFront (resources/flags, CC BY-SA 4.0; attribution "OpenFront"), themselves from
-Wikimedia Commons. Niger is left out (Roblox moderation, see the project memory); "uk" duplicates "gb".
-Regional flags the user asked for: california (2026-09-29).
+Country flags from Wikimedia Commons (https://commons.wikimedia.org), public domain or CC0 files only.
+Fetched 2026-10-25: each code's country by ISO 3166-1 alpha-2 on Wikidata (P297) -> its flag image (P41) ->
+the Commons file, its licence read from Commons (extmetadata LicenseShortName); codes without an ISO entry
+were looked up by name. Files are as downloaded except the <!DOCTYPE> line, removed where there was one.
+Many files are tagged "insignia" on Commons: official symbols, free of copyright but some uses of them can
+be restricted by other laws.
+Niger (ne) is left out (Roblox moderation, see the project memory); "uk" is not a separate flag (it would
+duplicate "gb"). Regional flag: california (added 2026-09-29).
+
+A different file from the Wikidata flag (P41), to keep the flag each code showed before or a free licence:
+  ac  "Flag of Ascension Island.svg" embeds a JPEG; this one is all vector
+  af  the 2013-2021 tricolour (P41 is now the Islamic Emirate flag)
+  aq  Antarctica has no P41; the Antarctic Treaty flag is CC BY-SA 3.0
+  bl  the CC0 drawing; "Flag of Saint Barthélemy (local).svg" is CC BY 2.5
+  bq  Bonaire's own flag (Caribbean Netherlands has no P41)
+  cc  the islands' flag (P41 is Australia's)
+  dg  the territory flag, as io
+  eh  Western Sahara has no P41: the Sahrawi Arab Democratic Republic flag
+  gf  the local flag (P41 is France's)
+  gp  a public-domain drawing; "Flag of Guadeloupe (Local).svg" is CC BY-SA 4.0
+  io  the territory flag (P41 is the Commissioner's flag)
+  om  a public-domain drawing; "Flag of Oman.svg" is under OGL-om 1.0
+  re  the local flag (P41 is France's)
+  sh  Saint Helena's flag (P41 is the United Kingdom's)
+  eo, eu, ic, un, california: by name
+
+code        licence        Commons file (https://commons.wikimedia.org/wiki/File:<file name>)
+ac          Public domain  Flag of Ascension Island PD.svg
+ad          Public domain  Flag of Andorra.svg
+ae          Public domain  Flag of the United Arab Emirates.svg
+af          Public domain  Flag of Afghanistan (2013–2021).svg
+ag          Public domain  Flag of Antigua and Barbuda.svg
+ai          Public domain  Flag of Anguilla.svg
+al          Public domain  Flag of Albania.svg
+am          Public domain  Flag of Armenia.svg
+ao          Public domain  Flag of Angola.svg
+aq          Public domain  Proposed flag of Antarctica (Graham Bartram).svg
+ar          Public domain  Flag of Argentina.svg
+as          Public domain  Flag of American Samoa.svg
+at          Public domain  Flag of Austria.svg
+au          Public domain  Flag of Australia (converted).svg
+aw          Public domain  Flag of Aruba.svg
+ax          Public domain  Flag of Åland.svg
+az          Public domain  Flag of Azerbaijan.svg
+ba          Public domain  Flag of Bosnia and Herzegovina.svg
+bb          Public domain  Flag of Barbados.svg
+bd          Public domain  Flag of Bangladesh.svg
+be          Public domain  Flag of Belgium.svg
+bf          Public domain  Flag of Burkina Faso.svg
+bg          Public domain  Flag of Bulgaria.svg
+bh          Public domain  Flag of Bahrain.svg
+bi          Public domain  Flag of Burundi.svg
+bj          Public domain  Flag of Benin.svg
+bl          CC0            Flag of Saint Barthélemy (Local).svg
+bm          Public domain  Flag of Bermuda.svg
+bn          Public domain  Flag of Brunei.svg
+bo          Public domain  Flag of Bolivia.svg
+bq          Public domain  Flag of Bonaire.svg
+br          Public domain  Flag of Brazil.svg
+bs          Public domain  Flag of the Bahamas.svg
+bt          Public domain  Flag of Bhutan.svg
+bv          Public domain  Flag of Norway.svg
+bw          Public domain  Flag of Botswana.svg
+by          Public domain  Flag of Belarus.svg
+bz          Public domain  Flag of Belize.svg
+ca          Public domain  Flag of Canada (Pantone).svg
+cc          Public domain  Infobox Flag of the Cocos (Keeling) Islands.svg
+cd          Public domain  Flag of the Democratic Republic of the Congo.svg
+cf          Public domain  Flag of the Central African Republic.svg
+cg          Public domain  Flag of the Republic of the Congo.svg
+ch          Public domain  Flag of Switzerland.svg
+ci          Public domain  Flag of Côte d'Ivoire.svg
+ck          Public domain  Flag of the Cook Islands.svg
+cl          Public domain  Flag of Chile.svg
+cm          Public domain  Flag of Cameroon.svg
+cn          Public domain  Flag of the People's Republic of China.svg
+co          Public domain  Flag of Colombia.svg
+cp          Public domain  Flag of France.svg
+cr          Public domain  Flag of Costa Rica.svg
+cu          Public domain  Flag of Cuba.svg
+cv          Public domain  Flag of Cape Verde (10-17).svg
+cw          Public domain  Flag of Curaçao.svg
+cx          Public domain  Flag of Christmas Island.svg
+cy          Public domain  Flag of Cyprus.svg
+cz          Public domain  Flag of the Czech Republic.svg
+de          Public domain  Flag of Germany.svg
+dg          Public domain  Flag of the British Indian Ocean Territory 2025.svg
+dj          Public domain  Flag of Djibouti.svg
+dk          Public domain  Flag of Denmark.svg
+dm          Public domain  Flag of Dominica.svg
+do          Public domain  Flag of the Dominican Republic.svg
+dz          Public domain  Flag of Algeria.svg
+ec          Public domain  Flag of Ecuador.svg
+ee          Public domain  Flag of Estonia.svg
+eg          Public domain  Flag of Egypt.svg
+eh          Public domain  Flag of the Sahrawi Arab Democratic Republic.svg
+eo          Public domain  Flag of Esperanto.svg
+er          Public domain  Flag of Eritrea.svg
+es          Public domain  Flag of Spain.svg
+et          Public domain  Flag of Ethiopia.svg
+eu          Public domain  Flag of Europe.svg
+fi          Public domain  Flag of Finland.svg
+fj          Public domain  Flag of Fiji.svg
+fk          Public domain  Flag of the Falkland Islands.svg
+fm          Public domain  Flag of the Federated States of Micronesia.svg
+fo          Public domain  Flag of the Faroe Islands.svg
+fr          Public domain  Flag of France.svg
+ga          Public domain  Flag of Gabon.svg
+gb          Public domain  Flag of the United Kingdom (3-5).svg
+gd          Public domain  Flag of Grenada.svg
+ge          Public domain  Flag of Georgia.svg
+gf          Public domain  Flag of French Guiana.svg
+gg          CC0            Flag of Guernsey.svg
+gh          Public domain  Flag of Ghana.svg
+gi          Public domain  Flag of Gibraltar.svg
+gl          Public domain  Flag of Greenland.svg
+gm          Public domain  Flag of The Gambia.svg
+gn          Public domain  Flag of Guinea.svg
+gp          Public domain  Unofficial flag of Guadeloupe (local).svg
+gq          Public domain  Flag of Equatorial Guinea.svg
+gr          Public domain  Flag of Greece.svg
+gs          CC0            Flag of South Georgia and the South Sandwich Islands.svg
+gt          Public domain  Flag of Guatemala.svg
+gu          Public domain  Flag of Guam.svg
+gw          Public domain  Flag of Guinea-Bissau.svg
+gy          Public domain  Flag of Guyana.svg
+hk          Public domain  Flag of Hong Kong.svg
+hm          Public domain  Flag of Australia (converted).svg
+hn          Public domain  Flag of Honduras (1949–2022, 2026–present).svg
+hr          Public domain  Flag of Croatia.svg
+ht          Public domain  Flag of Haiti.svg
+hu          Public domain  Flag of Hungary.svg
+ic          Public domain  Flag of the Canary Islands (simple).svg
+id          Public domain  Flag of Indonesia.svg
+ie          Public domain  Flag of Ireland.svg
+il          Public domain  Flag of Israel.svg
+im          CC0            Flag of the Isle of Man.svg
+in          Public domain  Flag of India.svg
+io          Public domain  Flag of the British Indian Ocean Territory 2025.svg
+iq          Public domain  Flag of Iraq.svg
+ir          Public domain  Flag of Iran.svg
+is          Public domain  Flag of Iceland.svg
+it          Public domain  Flag of Italy.svg
+je          Public domain  Flag of Jersey.svg
+jm          Public domain  Flag of Jamaica.svg
+jo          Public domain  Flag of Jordan.svg
+jp          Public domain  Flag of Japan.svg
+ke          Public domain  Flag of Kenya.svg
+kg          Public domain  Flag of Kyrgyzstan.svg
+kh          Public domain  Flag of Cambodia.svg
+ki          Public domain  Flag of Kiribati.svg
+km          Public domain  Flag of the Comoros.svg
+kn          Public domain  Flag of Saint Kitts and Nevis.svg
+kp          Public domain  Flag of North Korea.svg
+kr          Public domain  Flag of South Korea.svg
+kw          Public domain  Flag of Kuwait.svg
+ky          Public domain  Flag of the Cayman Islands.svg
+kz          Public domain  Flag of Kazakhstan.svg
+la          Public domain  Flag of Laos.svg
+lb          Public domain  Flag of Lebanon.svg
+lc          Public domain  Flag of Saint Lucia.svg
+li          Public domain  Flag of Liechtenstein.svg
+lk          Public domain  Flag of Sri Lanka.svg
+lr          Public domain  Flag of Liberia.svg
+ls          Public domain  Flag of Lesotho.svg
+lt          Public domain  Flag of Lithuania.svg
+lu          Public domain  Flag of Luxembourg.svg
+lv          Public domain  Flag of Latvia.svg
+ly          Public domain  Flag of Libya.svg
+ma          Public domain  Flag of Morocco.svg
+mc          Public domain  Flag of Monaco.svg
+md          Public domain  Flag of Moldova.svg
+me          Public domain  Flag of Montenegro.svg
+mf          Public domain  Flag of France.svg
+mg          Public domain  Flag of Madagascar.svg
+mh          Public domain  Flag of the Marshall Islands.svg
+mk          Public domain  Flag of North Macedonia.svg
+ml          Public domain  Flag of Mali.svg
+mm          Public domain  Flag of Myanmar.svg
+mn          Public domain  Flag of Mongolia.svg
+mo          Public domain  Flag of Macau.svg
+mp          Public domain  Flag of the Northern Mariana Islands.svg
+mq          Public domain  Flag-of-Martinique.svg
+mr          Public domain  Flag of Mauritania.svg
+ms          Public domain  Flag of Montserrat.svg
+mt          Public domain  Flag of Malta.svg
+mu          Public domain  Flag of Mauritius.svg
+mv          Public domain  Flag of Maldives.svg
+mw          Public domain  Flag of Malawi.svg
+mx          Public domain  Flag of Mexico.svg
+my          Public domain  Flag of Malaysia.svg
+mz          Public domain  Flag of Mozambique.svg
+na          Public domain  Flag of Namibia.svg
+nc          Public domain  Flag of FLNKS.svg
+nf          CC0            Flag of Norfolk Island.svg
+ng          Public domain  Flag of Nigeria.svg
+ni          Public domain  Flag of Nicaragua.svg
+nl          Public domain  Flag of the Netherlands.svg
+no          Public domain  Flag of Norway.svg
+np          Public domain  Flag of Nepal.svg
+nr          Public domain  Flag of Nauru.svg
+nu          Public domain  Flag of Niue.svg
+nz          Public domain  Flag of New Zealand.svg
+om          Public domain  Flag of Oman (2-1).svg
+pa          Public domain  Flag of Panama.svg
+pe          Public domain  Flag of Peru.svg
+pf          CC0            Flag of French Polynesia.svg
+pg          Public domain  Flag of Papua New Guinea.svg
+ph          Public domain  Flag of the Philippines.svg
+pk          Public domain  Flag of Pakistan.svg
+pl          Public domain  Flag of Poland.svg
+pm          Public domain  Flag of Saint-Pierre and Miquelon.svg
+pn          Public domain  Flag of the Pitcairn Islands.svg
+pr          Public domain  Flag of Puerto Rico.svg
+ps          Public domain  Flag of Palestine.svg
+pt          Public domain  Flag of Portugal (official).svg
+pw          Public domain  Flag of Palau.svg
+py          Public domain  Flag of Paraguay.svg
+qa          Public domain  Flag of Qatar.svg
+re          Public domain  Proposed flag of Réunion (VAR).svg
+ro          Public domain  Flag of Romania.svg
+rs          Public domain  Flag of Serbia.svg
+ru          Public domain  Flag of Russia.svg
+rw          Public domain  Flag of Rwanda.svg
+sa          Public domain  Flag of Saudi Arabia.svg
+sb          Public domain  Flag of the Solomon Islands.svg
+sc          Public domain  Flag of Seychelles.svg
+sd          Public domain  Flag of Sudan.svg
+se          Public domain  Flag of Sweden.svg
+sg          Public domain  Flag of Singapore.svg
+sh          Public domain  Flag of Saint Helena.svg
+si          Public domain  Flag of Slovenia.svg
+sj          Public domain  Flag of Norway.svg
+sk          Public domain  Flag of Slovakia.svg
+sl          Public domain  Flag of Sierra Leone.svg
+sm          Public domain  Flag of San Marino.svg
+sn          Public domain  Flag of Senegal.svg
+so          Public domain  Flag of Somalia.svg
+sr          Public domain  Flag of Suriname.svg
+ss          Public domain  Flag of South Sudan.svg
+st          Public domain  Flag of São Tomé and Príncipe.svg
+sv          Public domain  Flag of El Salvador.svg
+sx          Public domain  Flag of Sint Maarten.svg
+sy          Public domain  Flag of Syria (2025-).svg
+sz          Public domain  Flag of Eswatini.svg
+ta          Public domain  Flag of Tristan da Cunha.svg
+tc          Public domain  Flag of the Turks and Caicos Islands.svg
+td          Public domain  Flag of Chad.svg
+tf          Public domain  Flag of the French Southern and Antarctic Lands.svg
+tg          Public domain  Flag of Togo (3-2).svg
+th          Public domain  Flag of Thailand.svg
+tj          Public domain  Flag of Tajikistan.svg
+tk          Public domain  Flag of Tokelau.svg
+tl          Public domain  Flag of East Timor.svg
+tm          Public domain  Flag of Turkmenistan.svg
+tn          Public domain  Flag of Tunisia.svg
+to          Public domain  Flag of Tonga.svg
+tr          Public domain  Flag of Turkey.svg
+tt          Public domain  Flag of Trinidad and Tobago.svg
+tv          Public domain  Flag of Tuvalu.svg
+tw          Public domain  Flag of the Republic of China.svg
+tz          Public domain  Flag of Tanzania.svg
+ua          Public domain  Flag of Ukraine.svg
+ug          Public domain  Flag of Uganda.svg
+um          Public domain  Flag of the United States.svg
+un          Public domain  Flag of the United Nations.svg
+us          Public domain  Flag of the United States (DDD-F-416E specifications).svg
+uy          Public domain  Flag of Uruguay.svg
+uz          Public domain  Flag of Uzbekistan.svg
+va          Public domain  Flag of Vatican City (2023–present).svg
+vc          Public domain  Flag of Saint Vincent and the Grenadines.svg
+ve          Public domain  Flag of Venezuela.svg
+vg          Public domain  Flag of the British Virgin Islands.svg
+vi          Public domain  Flag of the United States Virgin Islands.svg
+vn          Public domain  Flag of Vietnam.svg
+vu          Public domain  Flag of Vanuatu.svg
+wf          Public domain  Flag of Wallis and Futuna.svg
+ws          Public domain  Flag of Samoa.svg
+xk          Public domain  Flag of Kosovo.svg
+ye          Public domain  Flag of Yemen.svg
+yt          CC0            Flag of Mayotte (Local).svg
+za          Public domain  Flag of South Africa.svg
+zm          Public domain  Flag of Zambia.svg
+zw          Public domain  Flag of Zimbabwe.svg
+california  Public domain  Flag of California.svg

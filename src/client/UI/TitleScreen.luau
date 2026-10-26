@@ -35,9 +35,9 @@ TitleScreen.DESKTOP_WORD_RESERVE = 440.0
 TitleScreen.WORD_MAX_W = 0.35
 --- The credits line under the dock (desktop, phones). It points at the help window by its top-bar name
 --- (2026-10-25: "See Help & Credits" instead of "see How to play").
-TitleScreen.CREDITS = "© OpenFront and Contributors  ·  Maps, flags and unit art from OpenFront (CC BY-SA 4.0)  ·  "
+TitleScreen.CREDITS = "© OpenFront and Contributors  ·  Maps from OpenFront (CC BY-SA 4.0)  ·  "
 	.. "Music by Rodrigo Flores  ·  GNU AGPL v3, no warranty: See Help & Credits"
-TitleScreen.CREDITS_SHORT = "© OpenFront and Contributors  ·  Maps & art: OpenFront (CC BY-SA 4.0)  ·  "
+TitleScreen.CREDITS_SHORT = "© OpenFront and Contributors  ·  Maps: OpenFront (CC BY-SA 4.0)  ·  "
 	.. "Music: Rodrigo Flores  ·  GNU AGPL v3"
 
 local SHINE_HALF = 70.0 -- smoothstep(0, 70, |x - sweep - (y - y0) * 0.35|)

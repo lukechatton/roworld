@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Art for the Arsenal (Data/Arsenal; 2026-10-04): original glyphs drawn here, nothing sampled.
 
-  assets/arsenal/shapes.png   map plates for the three Arsenal structures, like OpenFront's
-                              of_shapes.png (tools/assets/make_map_sprites.py): 3 columns
-                              (Artillery diamond, Airfield capsule, Railgun four-point star) x 2 rows
-                              (0 the whole shape -> border colour, 1 the inset shape -> fill colour),
-                              128 px cells
-  assets/arsenal/glyphs.png   their white map glyphs, 3 columns of 64 px (cannon, plane, railgun)
+  (the map plates and glyphs of the Arsenal's structures are drawn with every other structure's by
+  tools/assets/make_map_sprites.py since 2026-10-25)
   assets/arsenal/ui/<key>.png white 128 px masks for the interface, tinted with ImageColor3 like
                               Assets/UiIcons: artillery, airfield, railgun, mega, scatter, reinforce,
                               airstrike, slug, star, lock, reload, arsenal
@@ -30,9 +26,6 @@ OUT = os.path.join(ROOT, "assets", "arsenal")
 MANIFEST = os.path.join(ROOT, "src", "shared", "Assets", "ArsenalArt.luau")
 SS = 8          # supersampling
 UI_PX = 128     # interface masks
-GLYPH_PX = 64   # map glyphs
-CELL = 128      # map plates
-SHAPE_SCALE = [1.25, 1.35, 1.5]
 
 
 class Canvas:
@@ -219,7 +212,6 @@ UI = {
     "reload": g_reload,
     "arsenal": g_arsenal,
 }
-MAP_GLYPHS = ["artillery", "airfield", "railgun"]
 
 
 def glyph(name, px):
@@ -228,65 +220,16 @@ def glyph(name, px):
     return c.mask()
 
 
-# ---------------------------------------------------------------------------------------------------
-# Map plates
-# ---------------------------------------------------------------------------------------------------
-
-def plate(idx, inset):
-    size = CELL * SS
-    img = Image.new("L", (size, size), 0)
-    d = ImageDraw.Draw(img)
-    c = size / 2
-    radius = 0.45 * size
-    border = 0.06 / SHAPE_SCALE[idx] * size
-    if inset:
-        radius -= border
-    if idx == 0:      # diamond
-        d.polygon([(c, c - radius), (c + radius, c), (c, c + radius), (c - radius, c)], fill=255)
-    elif idx == 1:    # capsule (a runway)
-        h = radius * 0.62
-        d.rounded_rectangle([c - radius, c - h, c + radius, c + h], radius=h, fill=255)
-    else:             # four-point star
-        inner = radius * 0.46
-        pts = []
-        for i in range(8):
-            r = radius if i % 2 == 0 else inner
-            a = math.radians(-90 + i * 45)
-            pts.append((c + r * math.cos(a), c + r * math.sin(a)))
-        d.polygon(pts, fill=255)
-    return img.resize((CELL, CELL), Image.LANCZOS)
-
-
 def make():
     os.makedirs(os.path.join(OUT, "ui"), exist_ok=True)
-    shapes = Image.new("RGBA", (CELL * 3, CELL * 2), (255, 255, 255, 0))
-    for i in range(3):
-        for row, inset in ((0, False), (1, True)):
-            cell = Image.new("RGBA", (CELL, CELL), (255, 255, 255, 0))
-            cell.putalpha(plate(i, inset))
-            shapes.paste(cell, (i * CELL, row * CELL))
-    shapes.save(os.path.join(OUT, "shapes.png"))
-    glyphs = Image.new("RGBA", (GLYPH_PX * 3, GLYPH_PX), (255, 255, 255, 0))
-    for i, name in enumerate(MAP_GLYPHS):
-        glyphs.paste(glyph(name, GLYPH_PX), (i * GLYPH_PX, 0))
-    glyphs.save(os.path.join(OUT, "glyphs.png"))
     for name in UI:
         glyph(name, UI_PX).save(os.path.join(OUT, "ui", name + ".png"))
     # a contact sheet to look at (dark ground, like the game's panels)
     names = list(UI)
-    sheet = Image.new("RGBA", (UI_PX * 6, UI_PX * 2 + CELL * 2), (22, 26, 34, 255))
+    sheet = Image.new("RGBA", (UI_PX * 6, UI_PX * 2), (22, 26, 34, 255))
     for i, name in enumerate(names):
         g = Image.open(os.path.join(OUT, "ui", name + ".png"))
         sheet.alpha_composite(g, ((i % 6) * UI_PX, (i // 6) * UI_PX))
-    for i in range(3):
-        rim = shapes.crop((i * CELL, 0, (i + 1) * CELL, CELL))
-        fill = shapes.crop((i * CELL, CELL, (i + 1) * CELL, CELL * 2))
-        x, y = i * (CELL + 40) + 20, UI_PX * 2 + CELL // 2
-        dark = Image.new("RGBA", (CELL, CELL), (20, 30, 60, 255)); dark.putalpha(rim.getchannel("A"))
-        col = Image.new("RGBA", (CELL, CELL), (60, 110, 200, 255)); col.putalpha(fill.getchannel("A"))
-        sheet.alpha_composite(dark, (x, y)); sheet.alpha_composite(col, (x, y))
-        g = glyph(MAP_GLYPHS[i], 72)
-        sheet.alpha_composite(g, (x + (CELL - 72) // 2, y + (CELL - 72) // 2))
     sheet.save(os.path.join(ROOT, "build", "arsenal_art_sheet.png"))
     return names
 
@@ -294,24 +237,18 @@ def make():
 def upload(names):
     sys.path.insert(0, os.path.join(ROOT, "tools"))
     import upload as up
-    paths = [os.path.join(OUT, "shapes.png"), os.path.join(OUT, "glyphs.png")]
-    paths += [os.path.join(OUT, "ui", n + ".png") for n in names]
+    paths = [os.path.join(OUT, "ui", n + ".png") for n in names]
     rdir = os.path.join(OUT, "renders")
     renders = sorted(f[:-4] for f in os.listdir(rdir) if f.endswith(".png")) if os.path.isdir(rdir) else []
     rpaths = [os.path.join(rdir, r + ".png") for r in renders]
     ids = up.upload_images(paths + rpaths)
     L = ["-- GENERATED by tools/assets/make_arsenal_art.py — do not edit by hand.",
-         "-- The Arsenal's art (Data/Arsenal): map plates and glyphs for its three structures (the layout of",
-         "-- Assets/MapSprites' shapes / icons, kinds 6..8 in columns 0..2) and white interface masks.",
+         "-- The Arsenal's art (Data/Arsenal): white interface masks and the shop cards' renders (its",
+         "-- structures' map plates and glyphs are in Assets/MapSprites with every other structure's).",
          "return {",
-         f'\tshapes = {{ id = "{ids[paths[0]]}", cell = {CELL}, cols = 3 }},',
-         f'\tglyphs = {{ id = "{ids[paths[1]]}", cell = {GLYPH_PX}, cols = 3 }},',
-         "\t--- per structure kind 6..8: plate size and glyph fill, as StructureLayer.SHAPE_SCALE / ICON_FILL",
-         "\tshape_scale = { " + ", ".join(str(s) for s in SHAPE_SCALE) + " },",
-         "\ticon_fill = { 0.8, 0.8, 0.8 },",
          "\tui = {"]
     for i, n in enumerate(names):
-        L.append(f'\t\t{n} = "{ids[paths[2 + i]]}",')
+        L.append(f'\t\t{n} = "{ids[paths[i]]}",')
     L += ["\t},",
           "\t--- the shop cards' item renders (Data/Arsenal item key -> image; models of military hardware",
           "\t--- generated in Studio, photographed and cut out by tools/assets/make_arsenal_renders.py):",

@@ -268,7 +268,7 @@ function Locker.new(c: any)
 	pad.PaddingTop = UDim.new(0, 2)
 	pad.PaddingLeft = UDim.new(0, 2)
 	pad.Parent = sf
-	self._foot = UITheme.label("Flags from OpenFront (CC BY-SA 4.0)", 11, 500, UITheme.TEXT_3)
+	self._foot = UITheme.label("Flags: Wikimedia Commons (public domain)", 11, 500, UITheme.TEXT_3)
 	v:add_child(self._foot)
 	-- Roblox: the purchase prompt (the session's signals: bind, once UIRoot has one)
 	if IS_ROBLOX then
