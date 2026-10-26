@@ -1084,9 +1084,9 @@ function MapSurface._sweep(self: MapSurface, owner: number, fill: boolean)
 	table.insert(self._sweeps, { owner = owner, fill = fill, y = -1 })
 end
 
---- An alliance between `a` and `b` formed or ended: the tiles of each next to the other's (their
---- border's green, paint_queue). They can only be where the two owners' boxes overlap: two allies
---- with no border between them repaint nothing.
+--- An alliance between `a` and `b` formed or ended: the border tiles of each where the two owners' boxes
+--- overlap (those next to the other's have the alliance's green, paint_queue; the rest may have had it
+--- when the alliance changed, run_sweeps). Two allies with no border between them repaint nothing.
 ---   * Until 2026-10-10 an alliance repainted every tile of both owners (repaint_owner).
 function MapSurface.repaint_between(self: MapSurface, a: number, b: number)
 	if a <= 0 or b <= 0 or a == b or self._own == nil or not self.ready then
@@ -1305,17 +1305,20 @@ local function run_sweeps(self: MapSurface, room: number, deadline: number)
 			local row = y * W
 			rows += 1
 			if other ~= nil then
-				-- a tile of one with a 4-neighbour of the other's
+				-- a border tile of either (a 4-neighbour not its own). Until 2026-10-26 only the tiles
+				-- next to the other's when the sweep got there: a neighbour that changed owner while
+				-- the sweep waited (the other's when the alliance changed, somebody else's now) is
+				-- looked at with the alliance already changed (_expand_changes: "was a border and still
+				-- is"), so neither repainted the tile, and it kept the old alliance's border colour.
 				for xx = x0, x1 do
 					local t = row + xx
 					local o = readi32(own, t * 4)
-					local want = if o == owner then other else if o == other then owner else 0
-					if want ~= 0 and readu8(queued, t) == 0 then
+					if (o == owner or o == other) and readu8(queued, t) == 0 then
 						if
-							(xx > 0 and readi32(own, (t - 1) * 4) == want)
-							or (xx < W - 1 and readi32(own, (t + 1) * 4) == want)
-							or (y > 0 and readi32(own, (t - W) * 4) == want)
-							or (y < H - 1 and readi32(own, (t + W) * 4) == want)
+							(xx > 0 and readi32(own, (t - 1) * 4) ~= o)
+							or (xx < W - 1 and readi32(own, (t + 1) * 4) ~= o)
+							or (y > 0 and readi32(own, (t - W) * 4) ~= o)
+							or (y < H - 1 and readi32(own, (t + W) * 4) ~= o)
 						then
 							writeu8(queued, t, 1)
 							n += 1

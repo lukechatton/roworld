@@ -199,6 +199,50 @@ do
 	)
 end
 
+-- an alliance ends, and before the frame that repaints its border a neighbour on that border changes hands
+-- (2026-10-26: the tile kept the alliance's green border; the sweep looked for tiles next to the old ally,
+-- and the neighbour's change was looked at with the alliance already gone; seed 9 above on v108's map)
+do
+	local sim = new_sim(5)
+	for _ = 1, 400 do
+		sim:step()
+	end
+	local state, surface = client(sim, true)
+	local own = state.owner
+	local function key(x: number, y: number): number
+		return math.min(x, y) * 1024 + math.max(x, y)
+	end
+	-- a tile of `a` whose south neighbour is `b`'s, and a third owner `c`
+	local t, a, b = -1, 0, 0
+	for i = W, map.N - 2 * W - 1 do
+		local o1, o2 = buffer.readi32(own, i * 4), buffer.readi32(own, (i + W) * 4)
+		if o1 > 0 and o2 > 0 and o1 ~= o2 and not state.alliances[key(o1, o2)] then
+			t, a, b = i, o1, o2
+			break
+		end
+	end
+	local c = 0
+	for _, o in state:ranking() do
+		if o.id ~= a and o.id ~= b then
+			c = o.id
+			break
+		end
+	end
+	expect(t >= 0 and c > 0, "found a border between two owners, and a third owner")
+	state.alliances[key(a, b)] = true
+	state.alliance_changed:Fire(a, b, true, 0)
+	drain(surface)
+	local green = buffer.readu32(surface.comp, t * 4)
+	expect(differs(surface) == 0, "allied: the picture is a full redraw's")
+	state.alliances[key(a, b)] = nil
+	state.alliance_changed:Fire(a, b, false, 0)
+	buffer.writei32(own, (t + W) * 4, c)
+	state.tiles_changed:Fire({ (t + W) * 1024 + c }, { b })
+	drain(surface)
+	expect(buffer.readu32(surface.comp, t * 4) ~= green, "the alliance ended: the border is no longer the ally's")
+	expect(differs(surface) == 0, "an ended alliance and a neighbour that changed hands first: a full redraw's picture")
+end
+
 -- fallout (flags) and a nation falling: a later stretch of a match, with nukes
 do
 	local sim = new_sim(3)
@@ -289,7 +333,20 @@ do
 			what .. (if fills then ": its land too" else ": its land is left as it is (too big to repaint for a hover)")
 		)
 		expect(differs(surface) == 0, what .. " hovered: the picture is a full redraw's")
-		expect(if fills then steps <= 12 else steps > 3, ("%s: over %d frames"):format(what, steps))
+		-- (a fill scans the owner's box, SWEEP_SCAN_PER_STEP tiles a frame: a small nation whose box grew
+		-- across the map, as boxes do over a match, takes a frame per scan share more than 12)
+		local bx = surface._bbox[o.id]
+		local area = (bx[3] - bx[1] + 3) * (bx[4] - bx[2] + 3)
+		local most = math.max(
+			12,
+			math.ceil(area / MapSurface.SWEEP_SCAN_PER_STEP)
+				+ math.ceil(o.tiles / MapSurface.REPAINT_TILES_PER_STEP)
+				+ 1
+		)
+		expect(
+			if fills then steps <= most else steps > 3,
+			("%s: over %d frames (at most %d)"):format(what, steps, most)
+		)
 		surface:set_hover(0)
 		drain(surface)
 		expect(px(inner) == inner0 and px(edge) == edge0, what .. " left: as it was")
