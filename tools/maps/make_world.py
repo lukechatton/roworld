@@ -34,6 +34,7 @@ import urllib.request
 import numpy as np
 import zstandard
 from PIL import Image, ImageDraw
+from scipy import ndimage
 from scipy.io import netcdf_file
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -95,6 +96,11 @@ SOURCES = {
     "?altitude%5B(-90.0):6:(90.0)%5D%5B(-180.0):6:(180.0)%5D",
 }
 LAKE_MAX_SCALERANK = 3
+# Islands smaller than this (tiles) become sea and lakes smaller than this become land (2026-10-26: the
+# hundreds of 1-20 tile islands and lakes got in the way of play; the map before had none that small).
+MIN_ISLAND = 21
+MIN_LAKE = 21
+FOUR = [[0, 1, 0], [1, 1, 1], [0, 1, 0]]
 LICENSE = "Public domain"
 ATTRIBUTION = "Natural Earth, NOAA"
 CREDITS = "World map made with Natural Earth and NOAA ETOPO1 data (public domain)."
@@ -208,6 +214,24 @@ def carve_straits(land):
                 if prev is not None and prev[0] != tx and prev[1] != ty:
                     land[prev[1], tx] = False  # keep the channel 4-connected
                 prev = (tx, ty)
+
+
+def tidy(land):
+    """Drops islands under MIN_ISLAND tiles and fills lakes (water bodies other than the largest) under
+    MIN_LAKE tiles, in place. Returns the mask of the filled lake tiles."""
+    lab, _ = ndimage.label(land, structure=FOUR)
+    small = np.bincount(lab.ravel()) < MIN_ISLAND
+    small[0] = False
+    land[small[lab]] = False
+    lab, _ = ndimage.label(~land, structure=FOUR)
+    sizes = np.bincount(lab.ravel())
+    sizes[0] = 0
+    small = sizes < MIN_LAKE
+    small[0] = False
+    small[int(np.argmax(sizes))] = False  # the ocean
+    filled = small[lab]
+    land[filled] = True
+    return filled
 
 
 def postprocess(tiles, w, h):
@@ -370,9 +394,15 @@ def main():
     frac = land_s.reshape(H, SS, W, SS).mean(axis=(1, 3))
     land = frac > 0.5
     carve_straits(land)
+    filled = tidy(land)
     elev_sum = np.where(land_s, elev_s, 0).reshape(H, SS, W, SS).sum(axis=(1, 3))
     elev = elev_sum / np.maximum(land_s.reshape(H, SS, W, SS).sum(axis=(1, 3)), 1)
-    typed = np.where(land, LAND | magnitude(elev), 0).astype(np.uint8)
+    mag = magnitude(elev)
+    # a filled lake takes the height of the land around it
+    for _ in range(6):
+        near = ndimage.grey_dilation(np.where(filled, 0, mag), footprint=FOUR)
+        mag = np.where(filled, np.maximum(mag, near), mag)
+    typed = np.where(land, LAND | mag, 0).astype(np.uint8)
     tiles = postprocess(typed.tobytes(), W, H)
     grid = np.frombuffer(tiles, np.uint8).reshape(H, W)
     land_tiles = int(land.sum())

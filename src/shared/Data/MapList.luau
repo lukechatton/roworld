@@ -12,7 +12,7 @@ MapList.CREDITS = "World map made with Natural Earth and NOAA ETOPO1 data (publi
 --- {id, name, module, width, height, k_lin, categories, multiplayer_frequency, forced_modifiers,
 --- land_tiles, nations (count), replicated} sorted by name.
 MapList.maps = {
-	{ id = "world", name = "World", module = "World", width = 2000, height = 1000, k_lin = 1.0, categories = { "featured", "world" }, multiplayer_frequency = 30, forced_modifiers = { "isCrowded:50" }, land_tiles = 690242, nations = 71, replicated = true },
+	{ id = "world", name = "World", module = "World", width = 2000, height = 1000, k_lin = 1.0, categories = { "featured", "world" }, multiplayer_frequency = 30, forced_modifiers = { "isCrowded:50" }, land_tiles = 689018, nations = 71, replicated = true },
 }
 
 local by_id: { [string]: any } = {}
