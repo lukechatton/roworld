@@ -144,7 +144,7 @@ expect(LobbyRules.pick_map(maps, { "b" }, 0.9) == "a", "recent maps are skipped"
 expect(LobbyRules.pick_map(maps, { "a", "b" }, 0.3) ~= "c", "weight 0 never picked (falls back to recent)")
 
 -- the free-for-all playlist: never World while there are other maps (its own lobby takes PUBLIC MATCH's
--- seats); World alone (the real map list since 2026-10-26) is the whole rotation
+-- seats); World alone (the real map list for a while on 2026-10-26) is the whole rotation
 do
 	local w = LobbyRules.public_weights({ { id = "world", weight = 30 }, { id = "europe", weight = 6 } })
 	expect(#w == 1 and w[1].id == "europe", "World left out of a rotation that has other maps")
@@ -197,7 +197,11 @@ do
 	local n = 20000
 	local w0, o0 = simulate(maps, n) -- the raw listed weights
 	local w1, o1 = simulate(LobbyRules.public_weights(maps), n)
-	expect(w1 == 1 and w0 == 1, "World, the only map, is the whole free-for-all rotation")
+	if #MapList.maps == 1 then
+		expect(w1 == 1 and w0 == 1, "World, the only map, is the whole free-for-all rotation")
+	else
+		expect(w1 == 0, string.format("World in none of the free-for-all rotation (was %.1f%%)", w0 * 100))
+	end
 	expect(o1 == 0 and o0 == 0, string.format("no odd maps left to pick (%.1f%%, unweighted %.1f%%)", o1 * 100, o0 * 100))
 end
 

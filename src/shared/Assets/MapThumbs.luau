@@ -2,5 +2,10 @@
 -- Map thumbnails rendered from each map's own terrain data (its data module, in the in-game
 -- terrain palette), fit within 512 px. Keys = the registry's map ids.
 return {
+	africa = "rbxassetid://75475805071286",
+	asia = "rbxassetid://125565864168886",
+	europe = "rbxassetid://88867485196574",
+	northamerica = "rbxassetid://124335844737055",
+	southamerica = "rbxassetid://77554623776890",
 	world = "rbxassetid://76456931670439",
 }

@@ -164,9 +164,23 @@ expect(
 	"MapList default"
 )
 expect(
-	#MapList.maps == 1 and MapList.LICENSE == "Public domain",
-	"MapList: World only, our own map"
+	#MapList.maps >= 1 and MapList.LICENSE == "Public domain",
+	"MapList: our own maps"
 )
+-- every registered map loads, with its listed size and nations, each nation standing on land
+for _, row in MapList.maps do
+	local m = WorldMap.get(row.id)
+	local on_land = 0
+	for _, n in m.nations do
+		if n.tile ~= nil and m:is_land(n.tile) then
+			on_land += 1
+		end
+	end
+	expect(
+		m.W == row.width and m.H == row.height and #m.nations == row.nations and on_land == row.nations,
+		("map %s: %dx%d, %d nations on land"):format(row.id, m.W, m.H, on_land)
+	)
+end
 -- a resampled map carries its scale (World at 80%, the public matches' size)
 local big = WorldMap.get("world@80")
 expect(

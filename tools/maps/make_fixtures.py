@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Builds the two test-only fixture maps, tests/fixtures/maps/Pangaea.luau and Onion.luau (registered by id in
 tests/fixtures/fixture_maps.luau; not in the game). Both are entirely ours:
-  - pangaea (1000 x 1000): a window of our World map (src/shared/Data/Maps/World.luau, made by make_world.py
+  - pangaea (1000 x 1000): a window of our World map (src/shared/Data/Maps/World.luau, made by make_maps.py
     from public-domain data) from Iceland and West Africa to Japan and eastern Australia: Europe, Africa,
     Asia and Australia, with the Mediterranean, the Caspian, the Himalaya. The World rows south of 59.4 S
     (Antarctica) become open ocean. 29 nations: World's nations inside the window, kept spread apart.
   - onion (512 x 512): our own design, an onion cut in half: a hilly core and concentric rings of land
     and water (each layer its own relief), joined by land bridges, with channels letting the ocean into
     the outer water ring (the inner ones stay lakes). 3 nations: on the outer ring, an inner ring, the core.
-Tiles are retyped (land = 0x80 | elevation magnitude, water = 0), then make_world.postprocess works out
+Tiles are retyped (land = 0x80 | elevation magnitude, water = 0), then make_maps.postprocess works out
 water bodies, shorelines and water depths (the tile byte format of WorldMap.luau).
 
 Usage (from the repo root): .venv/bin/python tools/maps/make_fixtures.py [--out tests/fixtures/maps] [--preview DIR]
@@ -24,7 +24,7 @@ import numpy as np
 import zstandard
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import make_world as mw  # noqa: E402
+import make_maps as mw  # noqa: E402
 
 REPO = mw.REPO
 LAND, SHORE, OCEAN = mw.LAND, mw.SHORE, mw.OCEAN

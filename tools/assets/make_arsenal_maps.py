@@ -2,7 +2,7 @@
 """The Arsenal previews' ground: a piece of a real map, drawn like a match, in place of solid background
 colours (2026-10-24).
 
-Each scene is a window of our World map (src/shared/Data/Maps/World.luau, made by tools/maps/make_world.py
+Each scene is a window of our World map (src/shared/Data/Maps/World.luau, made by tools/maps/make_maps.py
 from public-domain data, equirectangular, 0.18 degrees a tile), drawn the way the game draws a match
 (Map/MapSurface): the terrain's colours, one pixel per tile, then the player's land left of a border and a
 nation's right of it, each owner's colour blended over the land at 150/255 (saturation 0.85) with its

@@ -260,7 +260,7 @@ HelpOverlay.SECTIONS = {
 HelpOverlay.LEGAL = {
 	"RoWorld is a modified version of OpenFront. © OpenFront and Contributors. Changes © 2026 Snick Co.",
 	"RoWorld is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License, version 3, with the additional terms in its LICENSE file. It comes with ABSOLUTELY NO WARRANTY. The licence comes with RoWorld's source code.",
-	"World map made with Natural Earth and NOAA ETOPO1 data (public domain). Country flags from Wikimedia Commons (public domain). Music by Rodrigo Flores.",
+	"Maps made with Natural Earth and NOAA ETOPO1 data (public domain). Country flags from Wikimedia Commons (public domain). Music by Rodrigo Flores.",
 	"RoWorld is not affiliated with or endorsed by OpenFront.",
 }
 --- Where the source lives, under the credits: plain text with the GitHub mark, since Roblox games
