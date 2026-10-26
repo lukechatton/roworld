@@ -94,6 +94,11 @@ else
 	rm -rf "$WT"; git worktree add -f --detach "$WT" "$HEAD_SHA" >/dev/null || exit 1
 fi
 ln -sfn "$REPO/.bin" "$WT/.bin"
+# The lobby service key is gitignored (it leaked once the repo went public, 2026-10-25): it ships from
+# this checkout's copy, and without it the servers would fail to start.
+SECRET_LUAU=src/server/Lobbies/Secret.luau
+[[ -s "$REPO/$SECRET_LUAU" ]] || { echo "missing $SECRET_LUAU (the lobby service key, gitignored): not publishing"; exit 1; }
+cp "$REPO/$SECRET_LUAU" "$WT/$SECRET_LUAU" || exit 1
 "$PY" "$WT/tools/sync.py" --full || exit 1
 check=$(sed "s/__PLACE_ID__/$PLACE_ID/" <<'LUA' | "$PY" "$REPO/tools/studio.py" luau Edit -
 if tostring(game.PlaceId) ~= "__PLACE_ID__" then return "WRONG PLACE " .. game.PlaceId end

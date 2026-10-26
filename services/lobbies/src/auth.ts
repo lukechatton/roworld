@@ -36,7 +36,15 @@ const NONCE_RE = /^[0-9A-Za-z-]{16,64}$/;
 const TS_RE = /^\d{9,11}$/;
 const SIG_RE = /^[0-9a-f]{64}$/;
 
-export type VerifyResult = { ok: true; nonce: string } | { ok: false; status: number; error: string; nonce?: string };
+/** The previous secret during a rotation (RL_SECRET_OLD): still accepted until `until` (unix s). */
+export interface OldSecret {
+	secret: string;
+	until: number;
+}
+
+// `secret` is the one the request was signed with: the reply is signed with it too, so a game server
+// still on the old secret can check it.
+export type VerifyResult = { ok: true; nonce: string; secret: string } | { ok: false; status: number; error: string; nonce?: string };
 
 export class NonceCache {
 	private seen = new Map<string, number>(); // nonce -> expiry (unix s)
@@ -65,7 +73,7 @@ export class NonceCache {
 
 export class Verifier {
 	readonly nonces: NonceCache;
-	constructor(private readonly secret: string, private readonly skew: number) {
+	constructor(private readonly secret: string, private readonly skew: number, private readonly old: OldSecret | null = null) {
 		this.nonces = new NonceCache(skew * 2 + 5);
 	}
 
@@ -79,10 +87,16 @@ export class Verifier {
 		const sig = h("x-tm-sig").toLowerCase();
 		if (!NONCE_RE.test(nonce)) return { ok: false, status: 401, error: "bad nonce" };
 		if (!TS_RE.test(ts) || !SIG_RE.test(sig)) return { ok: false, status: 401, error: "bad auth headers", nonce };
-		const want = signRequest(this.secret, ts, nonce, method, path, body);
-		if (!safeEqualHex(want, sig)) return { ok: false, status: 401, error: "bad signature", nonce };
+		let secret = this.secret;
+		if (!safeEqualHex(signRequest(secret, ts, nonce, method, path, body), sig)) {
+			const old = this.old;
+			if (old === null || nowSec >= old.until || !safeEqualHex(signRequest(old.secret, ts, nonce, method, path, body), sig)) {
+				return { ok: false, status: 401, error: "bad signature", nonce };
+			}
+			secret = old.secret;
+		}
 		if (Math.abs(nowSec - Number(ts)) > this.skew) return { ok: false, status: 401, error: "stale timestamp", nonce };
 		if (!this.nonces.add(nonce, nowSec)) return { ok: false, status: 401, error: "replayed nonce", nonce };
-		return { ok: true, nonce };
+		return { ok: true, nonce, secret };
 	}
 }

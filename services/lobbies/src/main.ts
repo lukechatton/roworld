@@ -119,7 +119,8 @@ const flagTimer = setInterval(() => {
 
 // the stats pages' password (STATS_PASSWORD in .env, read again every 5 s; unset: the pages stay locked)
 const statsPassword = envReader(dir, "STATS_PASSWORD");
-const server = createServer(store, { secret: config.secret, clockSkew: config.clockSkew, flags: () => ({ enabled }), log, presence, statsPassword });
+if (config.oldSecret) log("info", `rotation: the previous secret is accepted until ${new Date(config.oldSecret.until * 1000).toISOString()}`);
+const server = createServer(store, { secret: config.secret, oldSecret: config.oldSecret, clockSkew: config.clockSkew, flags: () => ({ enabled }), log, presence, statsPassword });
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 70_000;
 server.requestTimeout = 15_000;

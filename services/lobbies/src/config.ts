@@ -2,11 +2,14 @@
 // The secret is never logged. docs/lobby-service.md "Ops".
 import * as fs from "fs";
 import * as path from "path";
+import { OldSecret } from "./auth";
 
 export interface Config {
 	port: number;
 	host: string;
 	secret: string;
+	// a rotation: RL_SECRET_OLD is accepted too until RL_SECRET_OLD_UNTIL (unix s); either unset: off
+	oldSecret: OldSecret | null;
 	enabled: boolean; // LOBBIES=0: hubs go back to MemoryStore within one list (3 s), no publish
 	clockSkew: number; // s: accepted |now - X-TM-Ts|
 	stateFile: string | null; // snapshot of the store (survives a restart)
@@ -48,11 +51,14 @@ export function loadConfig(dir: string = process.cwd(), env: NodeJS.ProcessEnv =
 	const get = (k: string): string | undefined => env[k] ?? fileVars[k];
 	const secret = get("RL_SECRET") ?? "";
 	if (secret.length < 32) throw new Error("RL_SECRET missing or shorter than 32 characters (.env)");
+	const oldSecret = get("RL_SECRET_OLD") ?? "";
+	const oldUntil = num(get("RL_SECRET_OLD_UNTIL"), 0);
 	const level = get("LOG_LEVEL");
 	return {
 		port: num(get("PORT"), 3002),
 		host: get("HOST") ?? "0.0.0.0",
 		secret,
+		oldSecret: oldSecret.length >= 32 && oldSecret !== secret && oldUntil > 0 ? { secret: oldSecret, until: oldUntil } : null,
 		enabled: bool(get("LOBBIES"), true),
 		clockSkew: num(get("CLOCK_SKEW"), 120),
 		stateFile: get("STATE_FILE") === "off" ? null : path.join(dir, get("STATE_FILE") ?? "state.json"),

@@ -1,8 +1,9 @@
 import { strict as assert } from "assert";
 import * as http from "http";
 import { test } from "node:test";
-import { signRequest } from "../src/auth";
+import { OldSecret, signRequest } from "../src/auth";
 import { LobbyClient } from "../src/client";
+import { loadConfig } from "../src/config";
 import { FAIL_MAX } from "../src/statsAuth";
 import { createServer } from "../src/server";
 import { LobbyStore } from "../src/store";
@@ -42,7 +43,7 @@ async function login(url: string, password = PASSWORD, headers: Record<string, s
 
 async function withServer(
 	fn: (url: string, store: LobbyStore, flags: { enabled: boolean }) => Promise<void>,
-	extra: { statsPassword?: () => string | null; localHealth?: boolean } = {},
+	extra: { statsPassword?: () => string | null; localHealth?: boolean; oldSecret?: OldSecret | null } = {},
 ): Promise<void> {
 	const store = new LobbyStore(() => Date.now() / 1000);
 	const flags = { enabled: true };
@@ -112,6 +113,35 @@ test("auth: wrong secret, stale clock (with the time), replay are refused", asyn
 		assert.equal(await send(), 200);
 		assert.equal(await send(), 401);
 	});
+});
+
+test("a rotation: the old secret works (its replies signed with it) until RL_SECRET_OLD_UNTIL, then not", async () => {
+	const OLD = "f".repeat(64);
+	const now = Math.floor(Date.now() / 1000);
+	await withServer(
+		async (url) => {
+			const current = await new LobbyClient(url, SECRET).post<any>("/v1/lobbies/list", { jobId: "new" });
+			assert.equal(current.status, 200);
+			assert.ok(current.verified);
+			const old = await new LobbyClient(url, OLD).post<any>("/v1/lobbies/list", { jobId: "old" });
+			assert.equal(old.status, 200);
+			assert.ok(old.verified, "a server still on the old secret can check the reply");
+			const other = await new LobbyClient(url, "e".repeat(64)).post<any>("/v1/lobbies/list", { jobId: "x" });
+			assert.equal(other.status, 401);
+		},
+		{ oldSecret: { secret: OLD, until: now + 60 } },
+	);
+	await withServer(
+		async (url) => {
+			const old = await new LobbyClient(url, OLD).post<any>("/v1/lobbies/list", { jobId: "old" });
+			assert.equal(old.status, 401);
+		},
+		{ oldSecret: { secret: OLD, until: now } },
+	);
+	const cfg = (env: Record<string, string>) => loadConfig("/nonexistent", { RL_SECRET: SECRET, ...env }).oldSecret;
+	assert.deepEqual(cfg({ RL_SECRET_OLD: OLD, RL_SECRET_OLD_UNTIL: "2000000000" }), { secret: OLD, until: 2000000000 });
+	assert.equal(cfg({ RL_SECRET_OLD: OLD }), null, "no end time: never accepted");
+	assert.equal(cfg({ RL_SECRET_OLD_UNTIL: "2000000000" }), null);
 });
 
 test("validation: bad ids, oversized values, unknown routes", async () => {

@@ -30,7 +30,9 @@ local Teleports = require(script.Parent.Lobbies.Teleports) :: any
 local Party = require(script.Parent.Party) :: any
 local SharedClock = require(script.Parent.Lobbies.SharedClock) :: any
 local LobbyHttp = require(script.Parent.Lobbies.LobbyHttp) :: any
-local LobbySecret = require(script.Parent.Lobbies.Secret) :: any
+-- (gitignored: a clone without it keeps the MemoryStore lobby list; tools/publish.sh won't ship without it)
+local SecretModule = script.Parent.Lobbies:FindFirstChild("Secret")
+local LobbySecret = if SecretModule then require(SecretModule :: ModuleScript) :: any else nil
 local BotNames = require(Shared.Data.BotNames) :: any
 local BotFaces = require(script.Parent.BotFaces) :: any
 local FreshServers = require(script.Parent.FreshServers) :: any
@@ -260,7 +262,7 @@ function ServerMain.start()
 		-- experience, like Rofront Staging, must not show up in it; MemoryStore is its own per experience)
 		lobby_url = LobbyHttp.BASE_URL
 	end
-	if lobby_url ~= nil then
+	if lobby_url ~= nil and LobbySecret ~= nil then
 		local client = LobbyHttp.roblox(LobbySecret, now, lobby_url, print)
 		if client ~= nil then
 			local fallback = store

@@ -2,7 +2,7 @@
 // (statsAuth); GET /health, in full only to this box, a signed-in browser or a signed request.
 // docs/lobby-service.md "Endpoints".
 import * as http from "http";
-import { signResponse, Verifier } from "./auth";
+import { OldSecret, signResponse, Verifier } from "./auth";
 import type { Presence } from "./presence";
 import { buildStats } from "./stats";
 import { clientIp, COOKIE_DAYS, cookieHeader, isLoopback, loginPage, safeNext, StatsAuth, viaCloudflare } from "./statsAuth";
@@ -134,6 +134,8 @@ export function buildRoutes(store: LobbyStore, flags: () => { enabled: boolean }
 export interface ServerOptions {
 	presence?: Presence;
 	secret: string;
+	/** The previous secret while a rotation is under way (RL_SECRET_OLD / RL_SECRET_OLD_UNTIL). */
+	oldSecret?: OldSecret | null;
 	clockSkew: number;
 	flags: () => { enabled: boolean };
 	log: (level: "debug" | "info" | "warn", msg: string) => void;
@@ -145,7 +147,7 @@ export interface ServerOptions {
 }
 
 export function createServer(store: LobbyStore, opts: ServerOptions): http.Server {
-	const verifier = new Verifier(opts.secret, opts.clockSkew);
+	const verifier = new Verifier(opts.secret, opts.clockSkew, opts.oldSecret ?? null);
 	const nowSec = opts.nowSec ?? (() => Math.floor(Date.now() / 1000));
 	const seen: Seen = { hub: new Map(), match: new Map() };
 	const routes = buildRoutes(store, opts.flags, () => (opts.nowSec ? opts.nowSec() : Date.now() / 1000), seen, opts.presence);
@@ -401,7 +403,7 @@ export function createServer(store: LobbyStore, opts: ServerOptions): http.Serve
 			res.writeHead(status, {
 				"Content-Type": "application/json",
 				"Content-Length": Buffer.byteLength(body),
-				"X-TM-Sig": signResponse(opts.secret, verdict.nonce, status, body),
+				"X-TM-Sig": signResponse(verdict.secret, verdict.nonce, status, body),
 			});
 			res.end(body);
 		});
