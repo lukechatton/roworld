@@ -343,6 +343,14 @@ function LobbyRules.public_weights(maps: { any }): { { id: string, weight: numbe
 			table.insert(out, { id = m.id, weight = w })
 		end
 	end
+	-- (2026-10-26: World is the only map, so the playlist is World: without it no lobby is made)
+	if #out == 0 then
+		for _, m in maps do
+			if m.id == LobbyRules.WORLD_ID then
+				table.insert(out, { id = m.id, weight = math.max(0, tonumber(m.weight) or 0) })
+			end
+		end
+	end
 	return out
 end
 

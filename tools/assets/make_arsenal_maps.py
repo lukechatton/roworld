@@ -2,11 +2,12 @@
 """The Arsenal previews' ground: a piece of a real map, drawn like a match, in place of solid background
 colours (2026-10-24).
 
-Each scene is a window of one of our maps (src/shared/Data/Maps, src/server/MapData), drawn the
-way the game draws a match (Map/MapSurface): the terrain's colours, one pixel per tile, then the player's
-land left of a border and a nation's right of it, each owner's colour blended over the land at 150/255
-(saturation 0.85) with its border tiles opaque (HSL lightness - 0.125), water never owned and a coast a
-border. The border is a column that wanders (smooth noise per row, the same in every frame of a scene).
+Each scene is a window of our World map (src/shared/Data/Maps/World.luau, made by tools/maps/make_world.py
+from public-domain data, equirectangular, 0.18 degrees a tile), drawn the way the game draws a match
+(Map/MapSurface): the terrain's colours, one pixel per tile, then the player's land left of a border and a
+nation's right of it, each owner's colour blended over the land at 150/255 (saturation 0.85) with its
+border tiles opaque (HSL lightness - 0.125), water never owned and a coast a border. The border is a column
+that wanders (smooth noise per row, the same in every frame of a scene).
 Reinforcements has frames of its border advancing (`frames`), the client stepping through them.
 
 The scenes are packed in one atlas (cells of CELL_W x CELL_H tiles, a 2-px gutter repeating each cell's
@@ -26,6 +27,7 @@ import math
 import os
 import random
 import re
+import subprocess
 import sys
 
 import numpy as np
@@ -49,23 +51,30 @@ TEAL = (40, 170, 170)
 # land ends (`far`, of the cell; past it nobody's land or a `third` nation's), and the points of the
 # scene the demo draws on (only for the sheet's marks: land under them, not water)
 SCENES = {
-    "mega": dict(map="Italia", at=(960, 638), flip=True, split=0.40, enemy=RED, far=0.84,
+    # western and central Europe: France, the Low Countries, Germany, the Alps, Italy, the Adriatic
+    "mega": dict(map="World", at=(924, 176), flip=False, split=0.40, enemy=RED, far=0.84,
                  marks=[(0.15, 0.7), (0.72, 0.74), (0.72, 0.2)]),
-    "scatter": dict(map="Balkans", at=(792, 814), flip=False, split=0.38, enemy=ORANGE, far=0.86,
+    # central and eastern Europe: the Baltic's south shore, Poland, Belarus, Ukraine, the Black Sea
+    "scatter": dict(map="World", at=(1002, 162), flip=False, split=0.38, enemy=ORANGE, far=0.86,
                     third=TEAL,
                     marks=[(0.14, 0.7), (0.7, 0.62), (0.7, 0.2)]),
-    "reinforce": dict(map="Italia", at=(96, 132), flip=False, split=0.44, enemy=RED, advance=22, frames=9,
+    # the eastern Mediterranean and the Middle East: the Aegean, Anatolia, Cyprus, the Levant, Sinai, Iraq
+    "reinforce": dict(map="World", at=(1053, 252), flip=False, split=0.44, enemy=RED, advance=22, frames=9,
                       marks=[(0.13, 0.8), (0.25, 0.8), (0.37, 0.8), (0.82, 0.66), (0.78, 0.2)]),
-    "artillery": dict(map="Italia", at=(576, 352), flip=True, split=0.44, enemy=ORANGE, far=0.93, third=TEAL,
+    # the southern Caspian Sea, Iran, Turkmenistan and Afghanistan
+    "artillery": dict(map="World", at=(1191, 257), flip=False, split=0.44, enemy=ORANGE, far=0.93, third=TEAL,
                       marks=[(0.3, 0.55), (0.86, 0.66), (0.6, 0.52), (0.7, 0.78), (0.74, 0.2)]),
-    "airfield": dict(map="Europe", at=(816, 572), flip=False, split=0.40, enemy=RED, far=0.94,
+    # northern Russia: the White Sea and Barents coast to the Urals
+    "airfield": dict(map="World", at=(1148, 100), flip=False, split=0.40, enemy=RED, far=0.94,
                      marks=[(0.12, 0.72), (0.88, 0.7), (0.78, 0.2)]),
-    "railgun": dict(map="Italia", at=(48, 220), flip=False, split=0.30, enemy=TEAL,
+    # Egypt, Sinai, the Red Sea, Arabia and the Persian Gulf
+    "railgun": dict(map="World", at=(1076, 304), flip=False, split=0.30, enemy=TEAL,
                     marks=[(0.11, 0.6), (0.66, 0.64), (0.62, 0.2)]),
-    "reload2x": dict(map="Balkans", at=(96, 242), flip=False, split=0.68, enemy=RED,
+    # southern Russia and the Volga, the Sea of Azov and the Caspian's north shore at the bottom
+    "reload2x": dict(map="World", at=(1112, 157), flip=False, split=0.68, enemy=RED,
                      marks=[(0.3, 0.35), (0.3, 0.7), (0.86, 0.35), (0.86, 0.7)]),
-    # (the payout: the player's land only, darkened by the client)
-    "stars2x": dict(map="Europe", at=(840, 990), flip=False, split=None, enemy=None, marks=[]),
+    # (the payout: the player's land only, darkened by the client) North Africa: Algeria, Tunisia, Libya
+    "stars2x": dict(map="World", at=(924, 282), flip=False, split=None, enemy=None, marks=[]),
 }
 
 # Map/MapSurface terrain colours
@@ -85,7 +94,7 @@ _maps = {}
 def load(mod):
     if mod in _maps:
         return _maps[mod]
-    for d in ("src/shared/Data/Maps", "src/server/MapData"):
+    for d in ("src/shared/Data/Maps",):
         p = os.path.join(REPO, d, mod + ".luau")
         if os.path.exists(p):
             s = open(p).read()
@@ -285,7 +294,7 @@ def upload(path, group):
 def write_manifest(aid, placed, size):
     L = [
         "-- GENERATED by tools/assets/make_arsenal_maps.py. Do not edit.",
-        "-- The Arsenal previews' ground: pieces of real maps (CC BY-SA 4.0, credited with the maps), drawn like a match.",
+        "-- The Arsenal previews' ground: pieces of our World map (public-domain data), drawn like a match.",
         "-- cell: a scene's size in the atlas (tiles = px); scenes[key]: its cells (one per frame, top left)",
         "-- and its border's split of the scene (nil: the player's land only).",
         "return {",
@@ -303,6 +312,10 @@ def write_manifest(aid, placed, size):
     L += ["\t},", "\tplayer = Color3.fromRGB(%d, %d, %d)," % PLAYER, "}"]
     with open(MANIFEST, "w") as f:
         f.write("\n".join(L) + "\n")
+    # (stylua's layout, so `stylua --check` passes: the long scenes wrap)
+    stylua = os.path.join(REPO, ".bin", "stylua")
+    if os.path.exists(stylua):
+        subprocess.run([stylua, MANIFEST], check=True)
     print("wrote", MANIFEST)
 
 

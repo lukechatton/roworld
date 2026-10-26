@@ -1,6 +1,6 @@
 --!nonstrict
 -- Map picker (the single-player map list): a modal grid of map cards (thumbnail, name, size) under
--- category tabs. Maps and thumbnails are CC BY-SA 4.0, attributed in the footer. The grid is a Roblox
+-- category tabs. The footer names the public-domain data the World map is made from. The grid is a Roblox
 -- ScrollingFrame with a UIGridLayout hosted in a kit Control (the kit has no scroll container); card
 -- sizes follow UITheme.scale.
 -- Signals: picked(map_id), closed.
@@ -26,7 +26,7 @@ MapPicker.TABS = {
 }
 MapPicker.CARD = Vector2.new(168, 132)
 MapPicker.GRID_SIZE = Vector2.new(740, 420)
-MapPicker.ATTRIBUTION = "Maps from OpenFront, CC BY-SA 4.0"
+MapPicker.ATTRIBUTION = "Made with Natural Earth and NOAA ETOPO1 data (public domain)"
 
 function MapPicker.new(c: any)
 	local self = setmetatable({}, MapPicker.__mt)

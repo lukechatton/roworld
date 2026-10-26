@@ -1,5 +1,5 @@
 --!nonstrict
--- The playable maps for the UI: the replicated registry (Data/MapList: maps under CC BY-SA 4.0)
+-- The playable maps for the UI: the replicated registry (Data/MapList)
 -- joined with the uploaded thumbnails (Assets/MapThumbs, keyed by the source map folder name). Falls
 -- back to the one built-in map when the registry is missing.
 local RS = game:GetService("ReplicatedStorage")

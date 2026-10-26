@@ -611,7 +611,7 @@ do
 	expect(sim.phase == Defs.PHASE_PLAYING and sim.playing_since > 0, "countdown → PLAYING")
 	-- the countdown can be set (the tutorial's match starts a second after the capital is placed)
 	do
-		local quick = Sim.new(MAP, { seed = 5, tribes = 4, max_humans = 1, solo_countdown_ticks = 10 })
+		local quick = Sim.new(map, { seed = 5, tribes = 4, max_humans = 1, solo_countdown_ticks = 10 })
 		local qh = quick:add_human("q", "Quick")
 		local qs = -1
 		for _, t in LAND do

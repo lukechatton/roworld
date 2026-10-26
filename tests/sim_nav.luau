@@ -101,7 +101,7 @@ local n, bad = stress(map, nav, 1, 40, 99)
 expect(bad == 0 and n >= 30, "random ocean routes found, dense, on water, endpoints exact")
 
 -- a resampled map with lakes (more than one water body; k_lin > 1)
-local map2 = WorldMap.get("channelislands")
+local map2 = WorldMap.get("world@80")
 local navb = SimNav.shared(map2)
 expect(navb.region ~= nav.region and navb.W == map2.W, "another map gets its own graph (both live at once)")
 expect(SimNav.shared(map).region == nav.region, "the first map's graph is still cached")

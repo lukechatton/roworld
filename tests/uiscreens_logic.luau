@@ -63,7 +63,9 @@ do
 	gdansk = best
 end
 local south = gdansk + 12 * W
-local sweden = Places.latlon_to_tile(58.4, 15.6)
+-- (the east coast near Västervik: the block must reach the Baltic; inland, as before 2026-10-26, it
+-- missed the coast of the World map made from Natural Earth)
+local sweden = Places.latlon_to_tile(57.9, 16.3)
 block(gdansk, 5, ME)
 block(south, 6, ENEMY)
 block(sweden, 4, FAR)

@@ -84,7 +84,7 @@ do
 	local sim = F.new_sim(2)
 	sim.difficulty = 1
 	local N1 = F.owner(sim, "Nation", Defs.KIND_NATION, 100000000, 100000)
-	F.claim(sim, N1, 495, 142, 12)
+	F.claim(sim, N1, 495, 142, 13) -- (13: over 1500 land tiles on the World map made from Natural Earth)
 	local ai = SimAI.new()
 	ai:setup(sim)
 	local picked = nil

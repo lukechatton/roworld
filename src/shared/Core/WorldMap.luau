@@ -1,7 +1,7 @@
 --!native
 -- A playable map: static geography — terrain codes, water bodies, coasts and the flat grid
--- geometry every system uses. Maps are imported by tools/maps/import_maps.py (data CC BY-SA 4.0,
--- credited in MapList.CREDITS): WorldMap.from_terrain(data) builds one from a data module,
+-- geometry every system uses. The World map is made by tools/maps/make_world.py from public-domain
+-- data: WorldMap.from_terrain(data) builds one from a data module,
 -- WorldMap.get(id) returns the shared instance of a map id (built once per process),
 -- WorldMap.shared() the default map (MapList.DEFAULT, "world").
 --

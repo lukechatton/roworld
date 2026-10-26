@@ -34,11 +34,11 @@ TitleScreen.DESKTOP_WORD_RESERVE = 440.0
 --- since 2026-10-25, is wider than "ROFRONT" and reached under the Arsenal and crate buttons, top right).
 TitleScreen.WORD_MAX_W = 0.35
 --- The credits line under the dock (desktop, phones). It points at the help window by its top-bar name
---- (2026-10-25: "See Help & Credits" instead of "see How to play").
-TitleScreen.CREDITS = "© OpenFront and Contributors  ·  Maps from OpenFront (CC BY-SA 4.0)  ·  "
-	.. "Music by Rodrigo Flores  ·  GNU AGPL v3, no warranty: See Help & Credits"
-TitleScreen.CREDITS_SHORT = "© OpenFront and Contributors  ·  Maps: OpenFront (CC BY-SA 4.0)  ·  "
-	.. "Music: Rodrigo Flores  ·  GNU AGPL v3"
+--- (2026-10-25: "See Help & Credits" instead of "see How to play"; 2026-10-26: no map credit, the World
+--- map is RoWorld's own, made from public-domain data).
+TitleScreen.CREDITS = "© OpenFront and Contributors  ·  Music by Rodrigo Flores  ·  "
+	.. "GNU AGPL v3, no warranty: See Help & Credits"
+TitleScreen.CREDITS_SHORT = "© OpenFront and Contributors  ·  Music: Rodrigo Flores  ·  GNU AGPL v3"
 
 local SHINE_HALF = 70.0 -- smoothstep(0, 70, |x - sweep - (y - y0) * 0.35|)
 
@@ -394,8 +394,8 @@ function TitleScreen.new(c: any)
 	self:_build_dock()
 	self:_build_queue()
 	self:_build_solo_menu()
-	-- credits: the copyright notice the code's licence asks to keep visible, the CC BY-SA art and
-	-- maps, Rodrigo Flores' soundtrack (Orchestral Ambients) and the licence (2026-10-25: the full
+	-- credits: the copyright notice the code's licence asks to keep visible, Rodrigo Flores'
+	-- soundtrack (Orchestral Ambients) and the licence (2026-10-25: the full
 	-- notices are in How to play, HelpOverlay.LEGAL); phones get the short line (apply_layout)
 	self._credits = UITheme.label(
 		TitleScreen.CREDITS,

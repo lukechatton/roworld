@@ -253,14 +253,14 @@ HelpOverlay.SECTIONS = {
 	},
 }
 --- The "Credits & licence" card, last: the AGPL's Appropriate Legal Notices (a copyright notice, no
---- warranty, that the game may be shared under the licence, where the licence is) and the CC BY-SA credits
---- (2026-10-25: the AGPL licence and its notices, the copyright notice and the credits for the maps; the
---- flags, map icons, sprites and effects are RoWorld's own or public domain since the same day).
+--- warranty, that the game may be shared under the licence, where the licence is) and the credits
+--- (2026-10-25: the AGPL licence and its notices and the copyright notice; the flags, map icons, sprites
+--- and effects are RoWorld's own or public domain since that day, and the World map since 2026-10-26).
 --- NOTICE.md and LICENSE in the source have the full text.
 HelpOverlay.LEGAL = {
 	"RoWorld is a modified version of OpenFront. © OpenFront and Contributors. Changes © 2026 Snick Co.",
 	"RoWorld is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License, version 3, with the additional terms in its LICENSE file. It comes with ABSOLUTELY NO WARRANTY. The licence comes with RoWorld's source code.",
-	"Maps from OpenFront, licensed CC BY-SA 4.0; the versions converted for RoWorld and their thumbnails are shared under the same licence. Country flags from Wikimedia Commons (public domain). Music by Rodrigo Flores.",
+	"World map made with Natural Earth and NOAA ETOPO1 data (public domain). Country flags from Wikimedia Commons (public domain). Music by Rodrigo Flores.",
 	"RoWorld is not affiliated with or endorsed by OpenFront.",
 }
 --- Where the source lives, under the credits: plain text with the GitHub mark, since Roblox games

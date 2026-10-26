@@ -164,14 +164,14 @@ expect(
 	"MapList default"
 )
 expect(
-	#MapList.maps >= 90 and MapList.LICENSE == "CC BY-SA 4.0" and MapList.ATTRIBUTION == "OpenFront",
-	"MapList rows / licence"
+	#MapList.maps == 1 and MapList.LICENSE == "Public domain",
+	"MapList: World only, our own map"
 )
--- a budget-resampled map carries its scale
-local big = WorldMap.get("channelislands")
+-- a resampled map carries its scale (World at 80%, the public matches' size)
+local big = WorldMap.get("world@80")
 expect(
-	big.N <= 2500000 and big.k_lin > 2 and near(big.k_area, big.k_lin ^ 2),
-	"resampled map: tiles <= budget, k_lin > 1"
+	big.N < WorldMap.get("world").N and big.k_lin > 1 and near(big.k_area, big.k_lin ^ 2),
+	"resampled map: fewer tiles, k_lin > 1"
 )
 local Rb = Rules.for_map(big)
 expect(
