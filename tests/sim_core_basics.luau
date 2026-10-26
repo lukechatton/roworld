@@ -90,7 +90,7 @@ end
 expect(rmin == -3 and rmax == 3, "randi_range inclusive")
 expect(Rng.new(1):randi() ~= Rng.new(2):randi(), "different seeds differ")
 
--- WorldMap (pangaea: 1000 x 1000, 420,335 land tiles in its manifest)
+-- WorldMap (pangaea: 1000 x 1000, 308,767 land tiles in its manifest)
 local t0 = os.clock()
 local map = WorldMap.get("pangaea")
 print(
@@ -103,7 +103,7 @@ print(
 )
 expect(map.W == 1000 and map.H == 1000 and map.N == 1000000 and map.k_lin == 1 and map.k_area == 1, "size / scale")
 expect(WorldMap.get("pangaea") == map, "one shared instance per id")
-expect(map.contestable_count == 420335 and map.land_count == 420335, "land count matches the manifest")
+expect(map.contestable_count == 308767 and map.land_count == 308767, "land count matches the manifest")
 local first_land = map:land_tile(0)
 expect(first_land >= 0 and map:is_contestable(first_land), "land_list holds 0-based land tiles")
 local c = map:coast_tile(0)

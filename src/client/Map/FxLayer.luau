@@ -49,12 +49,13 @@ FxLayer.CONQUEST_S = 2.5
 FxLayer.CONQUEST_FADE_IN = 0.1
 FxLayer.CONQUEST_FADE_OUT = 0.6
 --- the flag's frames in Assets/MapFx (px: `flag` in its colours, `banner` the cloth under it, tinted),
---- how wide it is drawn (full-size tiles) and at least (px)
+--- how wide it is drawn (full-size tiles) and at least (px) (2026-10-26: 12 and 24, from 22 and 30:
+--- the flag was too big)
 FxLayer.FLAG = MapFx.flag
 FxLayer.BANNER = MapFx.banner
 FxLayer.FLAG_FRAME_S = 0.09
-FxLayer.FLAG_WORLD = 22
-FxLayer.FLAG_MIN_PX = 30
+FxLayer.FLAG_WORLD = 12
+FxLayer.FLAG_MIN_PX = 24
 --- a banner colour darker than this (luminance) is lightened toward white by BANNER_LIFT, so the cloth
 --- stands out from the flag's dark outline
 FxLayer.BANNER_MIN_LUMA = 0.32

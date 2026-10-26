@@ -9,7 +9,7 @@ angles, noise, a smoke density): nothing is traced or derived from their art.
              fireball (white-hot heart, yellow, orange, red, a dark outline, lit from the top left) that
              swells inside a thin shock ring, burns down to red and breaks into dark smoke with embers
              flying out, the smoke thinning to wisps
-  flag       10 frames of 24 x 24 (90 ms, drawn 22 tiles): the conquest's victory flag (the first version
+  flag       10 frames of 24 x 24 (90 ms, drawn 12 tiles): the conquest's victory flag (the first version
              was crossed swords; the elimination is now something other than a sword clash). It drops onto
              the conquered land, lands with a puff of
              dust and sinks a pixel, and its swallowtail banner waves; a glint on its gold top. Two rows:

@@ -40,13 +40,6 @@ while sim.phase ~= Defs.PHASE_PLAYING and guard < 2000 do
 	sim:step()
 	guard += 1
 end
-for _ = 1, 50 do
-	sim:step()
-end
-expect(sim.phase == Defs.PHASE_PLAYING and sim.o_alive[me] == 1, "playing, the human alive")
-
--- the strongest nation "conquers" the human
--- (a nation with a neighbour, so the player's attack order below has a target)
 local function neighbour_of(n: number): number
 	for id = 1, sim.owner_total do
 		if id ~= n and id ~= me and sim.o_alive[id] == 1 and sim.o_tiles[id] > 0 and sim:borders(n, id) then
@@ -55,6 +48,27 @@ local function neighbour_of(n: number): number
 	end
 	return 0
 end
+-- 50 ticks, then on until a nation borders someone (pangaea's nations start far apart)
+local function a_nation_borders(): boolean
+	for id = 1, sim.owner_total do
+		if sim.o_kind[id] == Defs.KIND_NATION and sim.o_alive[id] == 1 and neighbour_of(id) > 0 then
+			return true
+		end
+	end
+	return false
+end
+local ran = 0
+repeat
+	for _ = 1, 50 do
+		sim:step()
+	end
+	ran += 50
+until a_nation_borders() or ran >= 2000
+print(("  (%d ticks of play)"):format(ran))
+expect(sim.phase == Defs.PHASE_PLAYING and sim.o_alive[me] == 1, "playing, the human alive")
+
+-- the strongest nation "conquers" the human
+-- (a nation with a neighbour, so the player's attack order below has a target)
 local nation = 0
 for id = 1, sim.owner_total do
 	if
