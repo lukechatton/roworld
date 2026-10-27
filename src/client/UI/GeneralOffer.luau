@@ -18,9 +18,11 @@ local Cosmetics = UICtx.data("Cosmetics")
 
 local GeneralOffer = W.class(W.Control)
 
---- The window's width (logical px; phones: COMPACT_W).
-GeneralOffer.W = 430
-GeneralOffer.COMPACT_W = 360
+--- The columns' widths (logical px): the perks, and the price and SUBSCRIBE; phones: COMPACT_*.
+GeneralOffer.LEFT_W = 300
+GeneralOffer.SIDE_W = 190
+GeneralOffer.COMPACT_LEFT_W = 250
+GeneralOffer.COMPACT_SIDE_W = 160
 --- After a try to subscribe, the server's word is waited for this long before the button comes back.
 GeneralOffer.WAIT_S = 30.0
 
@@ -33,7 +35,7 @@ function GeneralOffer.new(c: any)
 	--- after Roblox's prompt closed with a try to buy: os.clock() then (the server's word is due)
 	self._waiting = nil :: number?
 	--- Roblox's price for this player: { robux = n } or { text = "..." } (nil: not known yet)
-	self._price = nil
+	self._cost = nil
 	self._price_asked = false
 	self:set_anchors_and_offsets_preset(W.PRESET_FULL_RECT)
 	self:set_mouse_filter(W.MOUSE_STOP)
@@ -61,11 +63,11 @@ function GeneralOffer.new(c: any)
 end
 
 function GeneralOffer._build(self)
-	self._panel = GlassPanel.new(24.0, 20.0, 18, true, 34)
+	self._panel = GlassPanel.new(24.0, 18.0, 18, true, 34)
 	self._panel:set_tint(UITheme.rgba(0.045, 0.065, 0.13, 0.97))
 	self._panel:set_border(UITheme.c(UITheme.GOLD, 0.45))
 	self:add_child(self._panel)
-	local v = UITheme.vbox(14)
+	local v = UITheme.vbox(10)
 	self._v = v
 	self._panel:add_child(v)
 	-- head: what it is, close
@@ -87,15 +89,20 @@ function GeneralOffer._build(self)
 	end)
 	head:add_child(close)
 	v:add_child(head)
+	-- two columns (2026-10-27: in one, the window ran off a phone's screen): the perks, and the
+	-- insignia over the price and SUBSCRIBE
+	local body = UITheme.hbox(20)
+	v:add_child(body)
+	local left = UITheme.vbox(10)
+	left.size_flags_vertical = W.SHRINK_CENTER
+	body:add_child(left)
 	self._title = UITheme.label("ROWORLD GENERAL", 26, 800, UITheme.GOLD, 2)
-	v:add_child(self._title)
-	self._sub =
-		UITheme.label("Every perk below, every month. Cancel any time in Roblox's settings.", 13, 500, UITheme.TEXT_2)
+	left:add_child(self._title)
+	self._sub = UITheme.label("Every perk below, every month.", 13, 500, UITheme.TEXT_2)
 	self._sub:set_autowrap(true)
-	v:add_child(self._sub)
-	-- the perks
-	self._perk_daily = self:_perk(v, UITheme.icon_rect("crate", 20, UITheme.GOLD))
-	self._perk_stars = self:_perk(v, UITheme.icon_rect("star", 20, UITheme.GOLD))
+	left:add_child(self._sub)
+	self._perk_daily = self:_perk(left, UITheme.icon_rect("crate", 20, UITheme.GOLD))
+	self._perk_stars = self:_perk(left, UITheme.icon_rect("star", 20, UITheme.GOLD))
 	local sw = W.Control.new()
 	sw:set_min_size(Vector2.new(24, 24))
 	sw:set_mouse_filter(W.MOUSE_IGNORE)
@@ -109,17 +116,72 @@ function GeneralOffer._build(self)
 		img.Parent = sw.gui
 		self._skin_img = img
 	end
-	self._perk_skin = self:_perk(v, sw)
-	-- subscribe
-	self._buy = UITheme.button("", "PrimaryButton", "robux", 48.0)
+	self._perk_skin = self:_perk(left, sw)
+	local right = UITheme.vbox(8)
+	right.size_flags_vertical = W.SHRINK_CENTER
+	self._right = right
+	body:add_child(right)
+	self._insignia = self:_build_insignia()
+	right:add_child(self._insignia)
+	self._price = UITheme.label("", 20, 800, UITheme.GOLD)
+	self._price:set_alignment(W.ALIGN_CENTER)
+	right:add_child(self._price)
+	self._buy = UITheme.button("SUBSCRIBE", "PrimaryButton", "", 48.0)
 	self._buy.pressed:Connect(function()
 		self:_subscribe()
 	end)
-	v:add_child(self._buy)
+	right:add_child(self._buy)
 	self._note = UITheme.label("", 11, 500, UITheme.TEXT_3)
 	self._note:set_alignment(W.ALIGN_CENTER)
 	self._note:set_autowrap(true)
-	v:add_child(self._note)
+	right:add_child(self._note)
+end
+
+--- A general's three stars on a slowly turning sunburst (the title's General button's insignia).
+function GeneralOffer._build_insignia(self): any
+	local c = W.Control.new()
+	c:set_mouse_filter(W.MOUSE_IGNORE)
+	c:set_min_size(Vector2.new(GeneralOffer.SIDE_W, 92))
+	if not IS_ROBLOX then
+		return c
+	end
+	local art = UITheme.crate_art()
+	local function img(props: { [string]: any }): ImageLabel
+		local i = Instance.new("ImageLabel")
+		i.BackgroundTransparency = 1
+		i.AnchorPoint = Vector2.new(0.5, 0.5)
+		i.ScaleType = Enum.ScaleType.Fit
+		for k, val in props do
+			(i :: any)[k] = val
+		end
+		i.Parent = c.gui
+		return i
+	end
+	self._rays = img({
+		Image = art.rays or "",
+		ImageColor3 = UITheme.GOLD,
+		ImageTransparency = 0.75,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(1.0, 1.6),
+	})
+	img({
+		Image = art.glow or "",
+		ImageColor3 = Color3.fromRGB(255, 196, 90),
+		ImageTransparency = 0.5,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.7, 1.1),
+	})
+	local star = UITheme.icon("star") or ""
+	for _, st in { { 0.27, 0.6, 0.32, -12 }, { 0.73, 0.6, 0.32, 12 }, { 0.5, 0.45, 0.62, 0 } } do
+		img({
+			Image = star,
+			ImageColor3 = UITheme.GOLD,
+			Position = UDim2.fromScale(st[1], st[2]),
+			Size = UDim2.fromScale(st[3] * 0.62, st[3]),
+			Rotation = st[4],
+		})
+	end
+	return c
 end
 
 --- A perk's row: `glyph` in a gold disc, a bold line and a muted one under it.
@@ -147,7 +209,7 @@ function GeneralOffer._perk(_self, parent: any, glyph: any): any
 	col:add_child(body)
 	row:add_child(col)
 	parent:add_child(row)
-	return { head = head, body = body }
+	return { head = head, body = body, disc = disc }
 end
 
 function GeneralOffer.bind(self, s: any)
@@ -190,9 +252,9 @@ function GeneralOffer._fetch_price(self)
 		if ok and type(info) == "table" then
 			local robux = tonumber(info.PriceInRobux)
 			if robux ~= nil and robux > 0 then
-				self._price = { robux = robux }
+				self._cost = { robux = robux }
 			elseif type(info.DisplayPrice) == "string" and info.DisplayPrice ~= "" then
-				self._price = { text = info.DisplayPrice }
+				self._cost = { text = info.DisplayPrice }
 			end
 			if self.is_open then
 				self:refresh()
@@ -227,29 +289,28 @@ function GeneralOffer.refresh(self)
 		Locker.show_item(self._skin_img, skin)
 	end
 	local on = self:subscribed()
+	local p = self._cost
+	self._price:set_text(
+		if p ~= nil and p.text ~= nil
+			then p.text .. " / month"
+			else string.format("%d Robux / month", if p ~= nil then p.robux else Subscription.ROBUX)
+	)
+	self._price:set_visible(not on)
 	if on then
-		self._buy:set_icon("")
 		self._buy:set_text("YOU'RE A GENERAL")
 		self._buy:set_disabled(true)
 		self._note:set_text("Thank you! It renews every month. Cancel any time in Roblox's settings.")
 	elseif self._waiting ~= nil then
-		self._buy:set_icon("")
 		self._buy:set_text("WAITING FOR ROBLOX…")
 		self._buy:set_disabled(true)
 		self._note:set_text("")
 	else
-		local p = self._price
-		if p ~= nil and p.text ~= nil then
-			self._buy:set_icon("")
-			self._buy:set_text(string.format("SUBSCRIBE  ·  %s / MONTH", p.text))
-		else
-			self._buy:set_icon("robux")
-			self._buy:set_text(
-				string.format("%d / MONTH  ·  SUBSCRIBE", if p ~= nil then p.robux else Subscription.ROBUX)
-			)
-		end
+		self._buy:set_text("SUBSCRIBE")
 		self._buy:set_disabled(Subscription.id() == "")
-		self._note:set_text("Renews every month until you cancel.")
+		self._note:set_text("Renews every month. Cancel any time in Roblox's settings.")
+	end
+	if self.is_open and self.visible then
+		self:apply_layout() -- (the lines' heights change with what they say)
 	end
 end
 
@@ -282,6 +343,9 @@ function GeneralOffer._on_prompt_done(self, tried: boolean)
 end
 
 function GeneralOffer._process(self, _dt: number)
+	if self.is_open and self._rays ~= nil then
+		self._rays.Rotation = (os.clock() * 12) % 360
+	end
 	if self._waiting ~= nil and os.clock() - self._waiting > GeneralOffer.WAIT_S then
 		self._waiting = nil
 		if self.is_open then
@@ -327,22 +391,52 @@ end
 function GeneralOffer.apply_layout(self)
 	local ctx = self.ctx
 	local compact = ctx.compact
-	local w = if compact then GeneralOffer.COMPACT_W else GeneralOffer.W
-	self._v:set_separation(if compact then 9 else 14)
-	self._title:set_font_size(if compact then 21 else 26)
-	for _, l in { self._sub, self._note } do
-		l:set_min_size(Vector2.new(w, 0))
+	local lw = if compact then GeneralOffer.COMPACT_LEFT_W else GeneralOffer.LEFT_W
+	local rw = if compact then GeneralOffer.COMPACT_SIDE_W else GeneralOffer.SIDE_W
+	local perks = { self._perk_daily, self._perk_stars, self._perk_skin }
+	self._v:set_separation(if compact then 6 else 10)
+	self._title:set_font_size(if compact then 20 else 26)
+	self._sub:set_min_size(Vector2.new(lw, 0))
+	self._note:set_min_size(Vector2.new(rw, 0))
+	self._note:set_font_size(if compact then 10 else 11)
+	for _, pk in perks do
+		pk.head:set_font_size(if compact then 13 else 15)
+		pk.body:set_font_size(if compact then 11 else 12)
+		pk.body:set_min_size(Vector2.new(lw - 52, 0))
+		pk.disc:set_min_size(if compact then Vector2.new(32, 32) else Vector2.new(40, 40))
 	end
-	for _, p in { self._perk_daily, self._perk_stars, self._perk_skin } do
-		p.body:set_min_size(Vector2.new(w - 52, 0))
-	end
-	self._buy:set_min_size(Vector2.new(w, if compact then 42 else 48))
+	self._insignia:set_min_size(Vector2.new(rw, if compact then 64 else 92))
+	self._price:set_font_size(if compact then 16 else 20)
+	self._buy:set_min_size(Vector2.new(rw, if compact then 40 else 48))
+	-- all of it, then (a short phone) what doesn't fit goes, a piece at a time: the line under the
+	-- title, the perks' second lines, the insignia, the note
 	local area = ctx:clear_rect()
 	local pn = self._panel
+	local function over(): number
+		pn:reset_size()
+		return pn:get_combined_minimum_size().Y - (area.Height - 8.0)
+	end
+	local parts = { { self._sub }, {}, { self._insignia }, { self._note } }
+	for _, pk in perks do
+		table.insert(parts[2], pk.body)
+	end
+	for _, group in parts do
+		for _, ctl in group do
+			ctl:set_visible(true)
+		end
+	end
+	for _, group in parts do
+		if over() <= 0 then
+			break
+		end
+		for _, ctl in group do
+			ctl:set_visible(false)
+		end
+	end
 	pn:reset_size()
 	local sz = pn:get_combined_minimum_size()
-	local p = area.Min + (Vector2.new(area.Width, area.Height) - sz) * 0.5
-	local rp = Vector2.new(math.floor(p.X + 0.5), math.floor(math.max(p.Y, area.Min.Y + 4.0) + 0.5))
+	local pos = area.Min + (Vector2.new(area.Width, area.Height) - sz) * 0.5
+	local rp = Vector2.new(math.floor(pos.X + 0.5), math.floor(math.max(pos.Y, area.Min.Y + 4.0) + 0.5))
 	pn:set_offsets(rp.X, rp.Y, rp.X, rp.Y)
 	pn:reset_size()
 end

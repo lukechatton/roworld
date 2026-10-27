@@ -16,6 +16,7 @@ local UICtx = require("./UICtx")
 local CrateButton = require("./CrateButton")
 local ArsenalButton = require("./ArsenalButton")
 local StarterButton = require("./StarterButton")
+local GeneralButton = require("./GeneralButton")
 local ShopButton = require("./ShopButton")
 local PartyPanel = require("./PartyPanel")
 local Signal = UITheme.core("Signal")
@@ -433,14 +434,10 @@ function TitleScreen.new(c: any)
 	end)
 	self:add_child(self._starter_btn)
 	-- and RoWorld General's (Data/Subscription; 2026-10-27), once the subscription exists
-	self._general_btn = UITheme.button("ROWORLD GENERAL", "GlassButton", "star", 40.0)
-	self._general_btn:set_font_size(13)
-	self._general_btn:add_theme_color_override("font_color", UITheme.GOLD)
-	self._general_btn:add_theme_color_override("icon_color", UITheme.GOLD)
+	self._general_btn = GeneralButton.new(c)
 	self._general_btn.pressed:Connect(function()
 		self.open_general:Fire()
 	end)
-	self._general_btn:set_visible(UICtx.data("Subscription").id() ~= "")
 	self:add_child(self._general_btn)
 	-- the party (team games on: staging only for now; hidden until the server sends one)
 	self._party = PartyPanel.new(c)
@@ -1008,21 +1005,17 @@ function TitleScreen._place_crate_button(self, compact: boolean, head_top: numbe
 	sb:set_offsets(right - ssz.X, stop, right, stop + ssz.Y)
 	-- RoWorld General's under them all
 	local gb = self._general_btn
-	gb:set_font_size(if compact then 11 else 13)
-	local gsz = gb:get_combined_minimum_size()
-	local gw = math.max(gsz.X, if compact then 150.0 else 200.0)
-	local gh = if compact then 32.0 else 40.0
+	gb:set_scale(if compact then GeneralButton.PHONE_K else 1.0)
+	local gsz = gb:size_px()
 	local below = if sb.visible then stop + ssz.Y else (if shb.visible then shtop + shsz.Y else top + size.Y)
 	local gtop = below + (if compact then 8.0 else 14.0)
 	gb:set_anchors(0, 0, 0, 0)
-	gb:set_offsets(right - gw, gtop, right, gtop + gh)
+	gb:set_offsets(right - gsz.X, gtop, right, gtop + gsz.Y)
 end
 
 --- RoWorld General's button says whether the player is one (Session.general).
 function TitleScreen.refresh_general(self)
-	local s = self.ctx.session
-	local on = s ~= nil and s.general == true
-	self._general_btn:set_text(if on then "GENERAL" else "ROWORLD GENERAL")
+	self._general_btn:refresh()
 	self:_refresh_greeting()
 end
 
