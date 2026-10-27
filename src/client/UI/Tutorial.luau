@@ -154,8 +154,8 @@ function Tutorial.begin(self)
 	self._sent = #self.ctx.sent_log
 	self._card:set_visible(false)
 	self._started = false
-	-- the Attack bar: from its default, never past the cap; the floor under the army comes once
-	-- the army has grown past it (_process)
+	-- the Attack bar: from its default, never past the cap; the floor under the army comes from the
+	-- FLOOR_FROM step, once it arms (Data.floor_armed; _process)
 	local ctx = self.ctx
 	ctx.ratio_max = 1.0
 	ctx:set_ratio(UICtx.DEFAULT_RATIO)
@@ -379,8 +379,7 @@ function Tutorial._process(self, delta: number)
 		ctx.troop_floor == nil
 		and i >= (Data.step_index(Data.FLOOR_FROM) or 1)
 		and o ~= nil
-		and (o.max_troops or 0) > 0
-		and o.troops >= Data.FLOOR_ARM * o.max_troops
+		and Data.floor_armed(o.troops or 0, o.max_troops or 0, ctx:alive_seconds())
 	then
 		ctx.troop_floor = Data.TROOP_FLOOR
 	end

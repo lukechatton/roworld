@@ -380,7 +380,8 @@ function UICtx.new()
 	self.touch = false
 	--- Running on a phone / tablet (touch mode never switches off).
 	self.touch_device = false
-	--- The Rofront Staging experience, or Studio: staging-only tools show (Data/Products).
+	--- The Rofront Staging experience, or Studio: staging-only tools show (Data/Products). See also
+	--- admin().
 	self.staging = false
 	if IS_ROBLOX then
 		pcall(function()
@@ -399,6 +400,8 @@ function UICtx.new()
 	--- (nil = no floor): UI/Tutorial sets both while it runs.
 	self.ratio_max = 1.0
 	self.troop_floor = nil :: number?
+	--- Tick at which the local player's nation was first seen in play this match (alive_seconds)
+	self.alive_from_tick = nil :: number?
 	--- Tick at which the PLAYING phase began (match clock and durations come from game ticks).
 	self.play_start_tick = -1.0
 	--- Test hook: when X >= 0 this replaces the real pointer position.
@@ -819,6 +822,30 @@ function UICtx.match_seconds(self: any): number
 		return 0.0
 	end
 	return math.max(0.0, (self:render_tick() - self.play_start_tick) / Defs.TICK_RATE)
+end
+
+--- A game admin (server/ServerMain sets AF_Admin on their Player: the owner, or rank 254+ in the
+--- owning group): "Replay as new player" shows on production too (2026-10-27).
+function UICtx.admin(_self: any): boolean
+	if not IS_ROBLOX then
+		return false
+	end
+	local lp = game:GetService("Players").LocalPlayer
+	return lp ~= nil and lp:GetAttribute("AF_Admin") == true
+end
+
+--- Seconds the local player's nation has been in play this match (0 before): from the first call
+--- that saw it alive while the match plays, so one who joined a match under way starts at 0 too
+--- (UIAdvisor.check_floor calls it every second; UIRoot clears the mark for every new match).
+function UICtx.alive_seconds(self: any): number
+	if self.state == nil or self.play_start_tick < 0.0 or not self:alive_player() then
+		return 0.0
+	end
+	local now = self:render_tick()
+	if self.alive_from_tick == nil then
+		self.alive_from_tick = now
+	end
+	return math.max(0.0, (now - self.alive_from_tick) / Defs.TICK_RATE)
 end
 
 --- Multiplayer match length in seconds (Session.MP_TIME_LIMIT_S when available).

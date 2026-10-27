@@ -80,8 +80,8 @@ Protocol.OP = {
 	SOLO_RESULT = 16, -- (report: table) a solo match's result, for its Stars (server/Rewards; reply STARS)
 	SOLO_HOP = 17, -- (difficulty: number, map_id: string?) hub: I am starting a solo match and this server
 	-- is outdated: teleport me to a fresh one to play it there (server/FreshServers; reply HOP_RESULT)
-	NEW_PLAYER = 18, -- Rofront Staging / Studio only: make me a new player again (matches counted,
-	-- the tutorial's Stars, the first crate's price); the settings and the inventory follow
+	NEW_PLAYER = 18, -- Rofront Staging / Studio, and game admins: make me a new player again (matches
+	-- counted, the tutorial's Stars, the first crate's price); the settings and the inventory follow
 	PARTY = 19, -- (action: "invite" | "accept" | "decline" | "leave" | "kick", user_id: number?) hub, team
 	-- games on (ServerMain.team_games): server/Party (reply PARTY_STATE)
 	-- server → client

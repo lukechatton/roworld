@@ -354,7 +354,7 @@ function PauseMenu.new(c: any)
 	self.pops_toggled = Signal.new()
 	self.restart_requested = Signal.new()
 	self.tips_reset = Signal.new()
-	--- Rofront Staging only: "Replay as new player" was pressed
+	--- Rofront Staging, and game admins: "Replay as new player" was pressed and confirmed
 	self.new_player_requested = Signal.new()
 	self.is_open = false
 	self._layout_compact = -1
@@ -478,13 +478,14 @@ function PauseMenu.new(c: any)
 		self._tips:set_text("Tips will show again")
 		self._tips:set_disabled(true)
 	end)
-	-- Rofront Staging (and Studio) only: be a new player again, to see the tutorial and every other
-	-- first-time thing (2026-10-04: "Replay as new player")
+	-- Rofront Staging (and Studio), and game admins on production (2026-10-27): be a new player again,
+	-- to see the tutorial and every other first-time thing (2026-10-04: "Replay as new player"). Asked
+	-- first: it ends the match being played, and on production it is a real account's match count.
 	self._new_player = UITheme.button("Replay as new player", "GhostButton", "retreat", 44.0)
 	self._new_player.alignment = W.ALIGN_LEFT
 	self._new_player:set_font_size(13)
 	self._new_player.pressed:Connect(function()
-		self.new_player_requested:Fire()
+		self:_ask_new_player()
 	end)
 	self._new_player:set_visible(false)
 	self._divider = UITheme.hdivider()
@@ -523,6 +524,8 @@ function PauseMenu.new(c: any)
 		self:close()
 		if self._confirm_action == "restart" then
 			self.restart_requested:Fire()
+		elseif self._confirm_action == "new_player" then
+			self.new_player_requested:Fire()
 		else
 			self.leave_requested:Fire()
 		end
@@ -536,6 +539,21 @@ function PauseMenu._ask_restart(self)
 	self._confirm_action = "restart"
 	self._confirm_text:set_text("Restart with a fresh world? This match will be lost.")
 	self._confirm_go:set_text("Restart")
+	self._confirm_go:set_icon("retreat")
+	self._main:set_visible(false)
+	self._confirm:set_visible(true)
+	self:_center()
+end
+
+function PauseMenu._ask_new_player(self)
+	local ctx = self.ctx
+	self._confirm_action = "new_player"
+	self._confirm_text:set_text(
+		"Play as a new player again? Your match count and the tutorial start over"
+			.. (if ctx:in_match() then ", and this match ends." else ".")
+			.. " What you own stays."
+	)
+	self._confirm_go:set_text("Replay")
 	self._confirm_go:set_icon("retreat")
 	self._main:set_visible(false)
 	self._confirm:set_visible(true)
@@ -609,7 +627,7 @@ function PauseMenu.open(self, labels_on: boolean, page: string?)
 	self._confirm_sw:set_visible(not on_title)
 	self._tips:set_text("Show tips again")
 	self._tips:set_disabled(false)
-	self._new_player:set_visible(ctx.staging == true)
+	self._new_player:set_visible(ctx.staging == true or ctx:admin())
 	local o = ctx:my()
 	local alive = o ~= nil and o.alive and ctx.state ~= nil and ctx.state.phase == Defs.PHASE_PLAYING
 	self._leave:set_visible(not on_title or ctx:mp_waiting())

@@ -542,9 +542,9 @@ function Session.starter_seen(self: any): boolean
 	return true
 end
 
---- Rofront Staging only (the server refuses it elsewhere): be a new player again — no match
---- counted, the tutorial's Stars and the first crate's price on offer again (2026-10-04,
---- the menu's "Replay as new player").
+--- Rofront Staging, and game admins on production (the server refuses it from anyone else): be a
+--- new player again — no match counted, the tutorial's Stars and the first crate's price on offer
+--- again (2026-10-04, the menu's "Replay as new player").
 function Session.new_player(self: any): boolean
 	local net = self.env.net
 	if net == nil or not net.connected or type(net.send) ~= "function" then

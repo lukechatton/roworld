@@ -896,8 +896,10 @@ function ServerMain.start()
 				end
 			end)
 		elseif op == OP.NEW_PLAYER then
-			-- Rofront Staging / Studio: "Replay as new player" (the game menu)
-			if not (Staging.here() or RunService:IsStudio()) then
+			-- "Replay as new player" (the game menu): Rofront Staging / Studio, and on production the game's
+			-- admins (2026-10-27: to play a first session as a new player does), who keep what they own there
+			local test = Staging.here() or RunService:IsStudio()
+			if not test and player:GetAttribute("AF_Admin") ~= true then
 				return
 			end
 			local c_used = credit_budget[player] or 0
@@ -905,9 +907,9 @@ function ServerMain.start()
 				return
 			end
 			credit_budget[player] = c_used + 1
-			print("[Staging] " .. player.Name .. " replays as a new player")
+			print(string.format("[%s] %s replays as a new player", if test then "Staging" else "Admin", player.Name))
 			SettingsStore.set(player, Analytics.STATS, { matches = 0 })
-			task.spawn(Purchases.reset_new_player, player)
+			task.spawn(Purchases.reset_new_player, player, not test)
 		elseif op == OP.SOLO_HOP then
 			-- the player starts a solo match on an outdated hub: to a fresh server, where it starts
 			local difficulty, map_id = ...
@@ -1174,6 +1176,8 @@ function ServerMain.start()
 	end
 	-- Game admins (the game's owner, or rank 254+ in the owning group; everyone in a Studio playtest)
 	-- are told which "players" are bot players — nobody else ever receives it (bots look like players).
+	-- Their Player has the AF_Admin attribute (set here only, so a client can't give it itself): the
+	-- game menu's "Replay as new player" shows on production too.
 	local admins: { [Player]: boolean } = {}
 	local admin_sent: { [Player]: string } = {}
 	local function is_admin(player: Player): boolean
@@ -1201,6 +1205,7 @@ function ServerMain.start()
 				if ok then
 					if yes then
 						admins[player] = true
+						player:SetAttribute("AF_Admin", true)
 					end
 					print(
 						string.format(

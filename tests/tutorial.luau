@@ -114,6 +114,13 @@ end
 expect(Tutorial.rookie(0) and Tutorial.rookie(Tutorial.ROOKIE_MATCHES - 1), "the first matches are a new player's")
 expect(not Tutorial.rookie(Tutorial.ROOKIE_MATCHES), "the next is not")
 expect(Tutorial.ROOKIE_FLOOR > 0 and Tutorial.FLOOR_ARM > Tutorial.ROOKIE_FLOOR, "the new player's floor arms above itself")
+-- it arms at FLOOR_ARM of the cap, or FLOOR_ARM_S seconds in: a player who sends every troop as it
+-- comes never reaches FLOOR_ARM (2026-10-27: a new nation starts at about a fifth of its cap)
+expect(not Tutorial.floor_armed(10000, 40000, 0), "not at the start, below FLOOR_ARM")
+expect(Tutorial.floor_armed(15000, 40000, 0), "at FLOOR_ARM of the cap")
+expect(Tutorial.floor_armed(1000, 40000, Tutorial.FLOOR_ARM_S), "or FLOOR_ARM_S seconds in, however low")
+expect(not Tutorial.floor_armed(1000, 0, 0), "no cap yet: not by troops")
+expect(Tutorial.FLOOR_ARM_S >= 5 and Tutorial.FLOOR_ARM_S <= 20, "the starting army is theirs to spend for a few seconds only")
 do
 	local Telemetry = require("../src/client/UI/Telemetry")
 	local saved = { matches = 3 }
@@ -133,9 +140,13 @@ do
 	local UIAdvisor = require("../src/client/UI/UIAdvisor")
 	local me = { troops = 10000, max_troops = 40000 }
 	local before = 2
+	local played = 0
 	local ctx = { troop_floor = nil }
 	function ctx.alive_player()
 		return true
+	end
+	function ctx.alive_seconds()
+		return played
 	end
 	function ctx.my()
 		return me
@@ -149,6 +160,14 @@ do
 	me.troops = 15000
 	adv:check_floor()
 	expect(ctx.troop_floor == Tutorial.ROOKIE_FLOOR, "then an order leaves a fifth of the cap at home")
+	ctx.troop_floor = nil
+	me.troops = 2000
+	played = Tutorial.FLOOR_ARM_S - 1
+	adv:check_floor()
+	expect(ctx.troop_floor == nil, "an army sent as it comes: not yet")
+	played = Tutorial.FLOOR_ARM_S
+	adv:check_floor()
+	expect(ctx.troop_floor == Tutorial.ROOKIE_FLOOR, "FLOOR_ARM_S seconds in, the floor holds all the same")
 	ctx.troop_floor = nil
 	before = Tutorial.ROOKIE_MATCHES
 	adv:check_floor()

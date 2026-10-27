@@ -34,7 +34,11 @@ Tutorial.RATIO_CAP = 0.5
 --- Keeps players from going too low in troop count (2026-10-04): while the tutorial
 --- runs an order leaves at least TROOP_FLOOR of the army's cap at home (it is trimmed to what may go,
 --- and refused when nothing may). The floor holds from the first time the army reaches FLOOR_ARM of
---- its cap: a new nation starts below it.
+--- its cap (a new nation starts below it), or from FLOOR_ARM_S seconds into play, whichever comes
+--- first (floor_armed).
+---   * The seconds since 2026-10-27: a new nation starts at about a fifth of its cap, so a player who
+---     sent every troop as it came never reached FLOOR_ARM, and the floor never held for the very
+---     players it is for.
 ---   * Not before the FLOOR_FROM step (2026-10-27): on "grow" it refused taps the card asked for
 ---     ("Troops low. Let them grow back" under the card's "Keep tapping empty land to grow"), since
 ---     the cap climbs with every tile taken. Grow lost 11.6% of the players who reached it, the most
@@ -42,11 +46,12 @@ Tutorial.RATIO_CAP = 0.5
 ---     first neighbour there is nobody to fear, and the Attack bar's cap (RATIO_CAP) still holds.
 Tutorial.TROOP_FLOOR = 0.25
 Tutorial.FLOOR_ARM = 0.35
+Tutorial.FLOOR_ARM_S = 10
 Tutorial.FLOOR_FROM = "attack"
 Tutorial.FLOOR_REASON = "Troops low. Let them grow back"
 --- A new player's first ROOKIE_MATCHES matches (the tutorial's among them) keep a floor under the
 --- army after the tutorial too (2026-10-27): an order leaves ROOKIE_FLOOR of the army's cap at home,
---- from the first time the army reaches FLOOR_ARM of it (client/UI/UIAdvisor.check_floor). An army
+--- from the time it arms (floor_armed; client/UI/UIAdvisor.check_floor). An army
 --- spent below a fifth of its cap all but loses the match, and 23% of matches ended within their
 --- first 3 minutes (Match funnel, the week to 2026-10-26). The first order held back in a match
 --- says why (Coach "floor").
@@ -56,6 +61,12 @@ Tutorial.ROOKIE_FLOOR = 0.2
 --- True while a player with `matches_before` matches before this one is still a new player.
 function Tutorial.rookie(matches_before: number): boolean
 	return matches_before < Tutorial.ROOKIE_MATCHES
+end
+
+--- True once the floor under a new player's army holds: the army has `troops` of its `cap`, at
+--- FLOOR_ARM of it or more, or the match has been played `played_s` seconds, FLOOR_ARM_S or more.
+function Tutorial.floor_armed(troops: number, cap: number, played_s: number): boolean
+	return played_s >= Tutorial.FLOOR_ARM_S or (cap > 0 and troops >= Tutorial.FLOOR_ARM * cap)
 end
 --- Seconds on the spawn step before a start is picked for the player.
 Tutorial.AUTO_SPAWN_S = 12

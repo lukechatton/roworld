@@ -399,6 +399,18 @@ do
 		"a crate bought"
 	)
 	expect(Purchases.starter_state(S) == false, "starter: not for a player who has paid")
+	-- a game admin's replay on production (2026-10-27): nothing taken, and one who paid still has
+	rows.u77.unlocks.mega = true
+	rows.u77.tutorial_paid = true
+	Purchases.reset_new_player(S, true)
+	expect(
+		rows.u77.paid == true and Purchases.has_unlock(S, "mega"),
+		"an admin's replay keeps what they own, and that they paid"
+	)
+	expect(
+		rows.u77.crates_bought == 0 and rows.u77.tutorial_paid == nil,
+		"... with the first crate's price and the tutorial's Stars on offer again"
+	)
 	-- a record from before `paid` existed: its receipts say it paid
 	rows.u78 = { receipts = { "old" }, stars_earned = 50 }
 	local O = { UserId = 78 }

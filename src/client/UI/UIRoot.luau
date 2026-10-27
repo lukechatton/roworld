@@ -376,11 +376,12 @@ function UIRoot.start_tutorial(self)
 	})
 end
 
---- Rofront Staging: "Replay as new player" (the game menu, and the settings page: the title's gear).
---- Everything first-time is as new again and the title follows, where the tutorial starts.
+--- Rofront Staging, and game admins on production: "Replay as new player" (the game menu, and the
+--- settings page: the title's gear). Everything first-time is as new again and the title follows,
+--- where the tutorial starts.
 function UIRoot.replay_as_new_player(self)
 	local ctx = self.ctx
-	if not ctx.staging then
+	if not (ctx.staging or ctx:admin()) then
 		return
 	end
 	self.coach:reset()
@@ -1675,6 +1676,7 @@ function UIRoot._bind_state(self, s: any)
 	if not (ctx.session ~= nil and ctx.session.state_is_resync == true) then
 		ctx:reset_ratio()
 		ctx.troop_floor = nil -- (a new player's floor arms again in this match: UIAdvisor.check_floor)
+		ctx.alive_from_tick = nil
 		if self.board.expanded then
 			self.board:close_for_match()
 			self.leaderboard_toggled:Fire(false)

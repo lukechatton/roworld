@@ -804,18 +804,21 @@ end
 --- Rofront Staging's "Replay as new player": the tutorial's Stars can be earned again, the first
 --- crate's price is on offer again, and so is the starter pack (as one who never paid, its clock not
 --- started, and without the pack's three items, which a new player doesn't have: the only things
---- taken; Stars, cosmetics and other unlocks stay).
-function Purchases.reset_new_player(player: any): boolean
+--- taken; Stars, cosmetics and other unlocks stay). `keep_owned` (a game admin on production,
+--- 2026-10-27): nothing is taken, and one who paid is still one who paid.
+function Purchases.reset_new_player(player: any, keep_owned: boolean?): boolean
 	local stored: Record? = nil
 	local ok, err = pcall(function()
 		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
 			local rec = clean(old, player.UserId)
 			rec.tutorial_paid = nil
 			rec.crates_bought = 0
-			rec.paid = false
 			rec.starter = nil
-			for _, k in Starter.ITEMS do
-				rec.unlocks[k] = nil
+			if not keep_owned then
+				rec.paid = false
+				for _, k in Starter.ITEMS do
+					rec.unlocks[k] = nil
+				end
 			end
 			stored = rec
 			return rec

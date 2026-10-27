@@ -177,11 +177,13 @@ end
 
 --- A new player's floor under the army outside the tutorial (which keeps its own while it runs):
 --- in the player's first Data/Tutorial.ROOKIE_MATCHES matches an order leaves ROOKIE_FLOOR of the
---- army's cap at home, from the first time the army reaches FLOOR_ARM of it (UICtx.troop_floor;
---- UIRoot clears it for every new match).
+--- army's cap at home, from the time it arms (Data/Tutorial.floor_armed: FLOOR_ARM of the cap, or
+--- FLOOR_ARM_S seconds in play) (UICtx.troop_floor; UIRoot clears it for every new match).
 function UIAdvisor.check_floor(self: any)
 	local ui = self.ui
 	local ctx = self.ctx
+	-- (first: the seconds count from the nation's first second in play, the tutorial's too)
+	local played = ctx:alive_seconds()
 	if ctx.troop_floor ~= nil or (ui.tutorial ~= nil and ui.tutorial.active) or not ctx:alive_player() then
 		return
 	end
@@ -190,7 +192,7 @@ function UIAdvisor.check_floor(self: any)
 	if o == nil or not Tut.rookie(ui.telemetry:matches_before()) then
 		return
 	end
-	if (o.max_troops or 0) > 0 and (o.troops or 0) >= Tut.FLOOR_ARM * o.max_troops then
+	if Tut.floor_armed(o.troops or 0, o.max_troops or 0, played) then
 		ctx.troop_floor = Tut.ROOKIE_FLOOR
 	end
 end
