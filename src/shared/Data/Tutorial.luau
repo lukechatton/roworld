@@ -59,17 +59,19 @@ function Tutorial.rookie(matches_before: number): boolean
 end
 --- Seconds on the spawn step before a start is picked for the player.
 Tutorial.AUTO_SPAWN_S = 12
---- "grow": GROW_TAPS more expansions, and this many times the land the nation had when the step began
---- (at least GROW_MIN tiles more). On open land one order alone triples a new nation, so the
---- expansions count. It teaches the rhythm, never "keep tapping" (2026-10-27: the card said "Keep
---- tapping empty land to grow", which is bad advice: an order sent on an emptied army leaves the
---- nation open, and a small army regrows slowly). An expansion counts when it is sent with the army
---- at GROW_READY of its cap or more; below that the card says to let the troops refill and the mark
---- is on the troop count, and taps meanwhile don't count.
-Tutorial.GROW_TAPS = 2
+--- "grow": let the troops refill, then one expansion. It teaches the rhythm, never "keep tapping"
+--- (2026-10-27: the card said "Keep tapping empty land to grow", which is bad advice: an order sent on
+--- an emptied army leaves the nation open, and a small army regrows slowly). An expansion counts when
+--- it is sent with the army at GROW_READY of its cap or more; below that the card says to let the
+--- troops refill, its bar fills towards ready (Tutorial.refill) and the mark is on the troop count.
+---   * v111 (2026-10-27) asked for GROW_TAPS = 2 such expansions and 3x the land, with no bar while
+---     the troops refilled: Skip on this step went up by about 60% a match (06:00-16:00 UTC against
+---     the day before). Now one expansion, and the wait shows how far it has to go: about 7 s after
+---     the "expand" step's order on open land (a headless Sim, 2026-10-27). An order sent before then
+---     spends the refill, so the card says to wait for the bar for EARLY_S.
+Tutorial.GROW_TAPS = 1
 Tutorial.GROW_READY = 0.3
-Tutorial.GROW_FACTOR = 3
-Tutorial.GROW_MIN = 300
+Tutorial.EARLY_S = 2.5
 --- "attack": passed over when nobody borders the player this long after the step began.
 Tutorial.CONTACT_WAIT_S = 25
 --- The Attack bar's step asks for one stop of it, RATIO_GOAL (the next one up from where the bar
@@ -101,6 +103,8 @@ Tutorial.STEPS = {
 		touch = "Tap empty land to expand",
 		desktop = "Click empty land to expand",
 		wait = "Now let your troops refill",
+		-- (an order sent while they refill: it spends them, and the bar drops)
+		early = "Wait for the bar to fill",
 		bar = true,
 	},
 	-- (the neighbour before the slider: a first attack at the slider's 20% leaves an army at home; in
@@ -155,9 +159,14 @@ function Tutorial.is_new(ui: any, stats: any): boolean
 	return true
 end
 
---- The land "grow" asks for, from the land the nation had when the step began.
-function Tutorial.grow_goal(tiles: number): number
-	return math.floor(math.max(tiles * Tutorial.GROW_FACTOR, tiles + Tutorial.GROW_MIN))
+--- "grow"'s bar while the army refills: how far `troops` are towards GROW_READY of `cap` (0..1), and
+--- never below `shown` (what the bar already shows): the cap climbs as the expansion's land comes in,
+--- and a bar that slides back while nobody did anything reads as broken. (An order sent meanwhile
+--- does empty it: the client passes no `shown` then.)
+function Tutorial.refill(troops: number, cap: number, shown: number?): number
+	local need = Tutorial.GROW_READY * cap
+	local f = if need > 0 then math.clamp(troops / need, 0, 1) else 1
+	return math.max(f, shown or 0)
 end
 
 --- Where step `id` is in STEPS, or nil.

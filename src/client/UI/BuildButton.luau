@@ -145,6 +145,20 @@ function BuildButton.refresh(self)
 	end
 	local av = rules:availability(self.kind)
 	local own = rules:owned(self.kind)
+	-- (the reason alone is not drawn, only told by the hint card: "Need 12.3K more gold" changed with
+	-- every gold tick and redrew each slot the player could not afford, ~40 writes each, 2026-10-27)
+	local old = self._av
+	if
+		own == self._owned
+		and av.ok == old.ok
+		and av.locked == old.locked
+		and av.cost == old.cost
+		and av.arsenal == old.arsenal
+		and av.reason ~= old.reason
+	then
+		old.reason = tostring(av.reason or "")
+		return
+	end
 	if not av_equal(av, self._av) or own ~= self._owned then
 		self._av = {
 			ok = av.ok == true,

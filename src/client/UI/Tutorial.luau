@@ -302,6 +302,8 @@ function Tutorial._say(self, i: number, arg: string?)
 	self._text:set_text(txt)
 	self._bar:set_visible(step.bar == true)
 	self._fill.Size = UDim2.fromScale(0, 1)
+	self._fill.BackgroundColor3 = UITheme.AMBER
+	self._fill_f = 0.0
 	self._skip:set_text("Skip")
 	self:_tint(UITheme.AMBER)
 	self._card:set_visible(i > 1)
@@ -431,10 +433,11 @@ function Tutorial._process(self, delta: number)
 			-- the step's line (and what it needs) once, when it comes up
 			self._shown = i
 			if id == "grow" then
-				self._base = o.tiles
-				self._goal = Data.grow_goal(o.tiles)
 				self._taps = 0
 				self._ready = nil
+				self._refill = nil
+				self._early = 0.0
+				self._line = nil
 			elseif id == "attack" then
 				self._neighbour = nil
 			elseif id == "ratio" then
@@ -457,22 +460,47 @@ function Tutorial._process(self, delta: number)
 			end
 			point = ui.advisor:frontier_point()
 		elseif id == "grow" then
-			-- expand, let the troops refill, expand again: an order counts when the army was ready
-			-- (Data.GROW_READY) as it went
-			if any and self._ready then
-				self._taps += 1
+			-- let the troops refill, then expand: an order counts when the army was ready
+			-- (Data.GROW_READY) as it went; the bar fills towards ready
+			if any then
+				if self._ready then
+					self._taps += 1
+				else
+					-- (an order sent meanwhile spends the refill: the bar drops, and the card says why)
+					self._refill = nil
+					self._early = Data.EARLY_S
+				end
 			end
-			local ready = (o.max_troops or 0) <= 0 or o.troops >= Data.GROW_READY * o.max_troops
-			if ready ~= self._ready then
-				self._ready = ready
-				self._text:set_text(if ready then (if ctx.touch then step.touch else step.desktop) else step.wait)
-			end
-			local land = math.clamp((o.tiles - self._base) / math.max(self._goal - self._base, 1), 0, 1)
-			local taps = math.min(self._taps / Data.GROW_TAPS, 1)
-			self._fill.Size = UDim2.fromScale((land + taps) * 0.5, 1)
-			if o.tiles >= self._goal and self._taps >= Data.GROW_TAPS then
+			self._early = math.max((self._early or 0.0) - delta, 0.0)
+			if self._taps >= Data.GROW_TAPS then
 				self:_advance()
 				return
+			end
+			local cap = o.max_troops or 0
+			local f = if cap > 0 then Data.refill(o.troops, cap, self._refill) else 1.0
+			self._refill = f
+			-- (a full bar stays full, so ready stays ready while the cap climbs under it)
+			local ready = f >= 1.0
+			if ready ~= self._ready then
+				if ready and self._ready == false then
+					-- refilled: the card says so, so eyes on the troop count come back up
+					ctx:sfx("tick", -6.0)
+					UICtx.pop_in(self._card, 0.0, 0.97, 0.25, true)
+				end
+				self._ready = ready
+				self._fill.BackgroundColor3 = if ready then UITheme.GREEN else UITheme.AMBER
+			end
+			local line = if ready
+				then (if ctx.touch then step.touch else step.desktop)
+				elseif self._early > 0.0 then step.early
+				else step.wait
+			if line ~= self._line then
+				self._line = line
+				self._text:set_text(line)
+			end
+			if math.abs(f - (self._fill_f or 0.0)) >= 0.005 or (ready and self._fill_f ~= 1.0) then
+				self._fill_f = f
+				self._fill.Size = UDim2.fromScale(f, 1)
 			end
 			if not ready then
 				-- the troop count, filling

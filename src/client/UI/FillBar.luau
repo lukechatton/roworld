@@ -61,6 +61,30 @@ function FillBar.set_target(self, v: number, instant: boolean?)
 	self:queue_redraw()
 end
 
+--- The fill's pixel edges at the current value (what _redraw's fill and glow depend on; -1: none).
+local function fill_px(self): number
+	local fw = self.size.X * self.value
+	if not (fw > 0.5) then
+		return -1
+	end
+	local frw = math.max(fw, self.bar_height)
+	local s = UITheme.scale
+	return math.floor(frw * s + 0.5) * 65536 + math.floor((-1.5 + (frw + 3)) * s + 0.5)
+end
+
+--- Straight to `v` (as set_target(v, true)), drawn again only when that moves the fill a pixel: for a
+--- bar whose colours, goal and markers stay as they are (an alliance card's countdown, set every
+--- frame: ~20 writes a draw for a bar that moves a pixel every few frames, 2026-10-27).
+function FillBar.set_instant(self, v: number)
+	local t = math.clamp(v, 0, 1)
+	self.target = t
+	self.value = t
+	if self._geo ~= nil and self._drawn_px ~= nil and self._drawn_px == fill_px(self) then
+		return
+	end
+	self:queue_redraw()
+end
+
 function FillBar._process(self, delta: number)
 	if math.abs(self.value - self.target) > 1e-6 then
 		self.value = self.value + (self.target - self.value) * (1 - math.exp(-delta * 6.0))
@@ -178,6 +202,7 @@ function FillBar._redraw(self)
 		self._marks[i][1].Visible = false
 		self._marks[i][2].Visible = false
 	end
+	self._drawn_px = fill_px(self)
 end
 
 return FillBar

@@ -707,6 +707,43 @@ function UICtx.my(self: any): any
 	return s:get_owner(s.local_owner)
 end
 
+--- GameState.ranking()'s first (most land among the living; ties: the lower id), or nil, and an
+--- owner's place in it (1-based; 0: not in it), each from one pass over the owners. (2026-10-27: the
+--- status pill sorted every owner four times a second for these, twice on a phone, and the command
+--- bar's crown once more on every stats update.)
+local function ranks_before(o: any, p: any): boolean
+	return o.tiles > p.tiles or (o.tiles == p.tiles and o.id < p.id)
+end
+
+function UICtx.leader(self: any): any
+	local s = self.state
+	if s == nil then
+		return nil
+	end
+	local best = nil
+	for _, o in s.owners do
+		if o.alive and o.tiles > 0 and (best == nil or ranks_before(o, best)) then
+			best = o
+		end
+	end
+	return best
+end
+
+function UICtx.rank_of(self: any, id: number): number
+	local s = self.state
+	local me = if s ~= nil then s:get_owner(id) else nil
+	if me == nil or not (me.alive and me.tiles > 0) then
+		return 0
+	end
+	local r = 1
+	for _, o in s.owners do
+		if o ~= me and o.alive and o.tiles > 0 and ranks_before(o, me) then
+			r += 1
+		end
+	end
+	return r
+end
+
 --- A commander that still has to place a capital (spawn phase, or dropping into a running match).
 function UICtx.needs_spawn(self: any): boolean
 	local o = self:my()

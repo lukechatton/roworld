@@ -35,8 +35,6 @@ for i, s in Tutorial.STEPS do
 	seen[s.id] = true
 end
 expect(Tutorial.funnel_step("nope") == nil, "an unknown step has none")
-expect(Tutorial.grow_goal(100) == 400, "a small nation is asked for GROW_MIN more land")
-expect(Tutorial.grow_goal(1000) == 3000, "a bigger one for GROW_FACTOR times its land")
 
 -- the slider's cap and the floor under the army
 expect(Tutorial.RATIO_CAP <= 0.5 and Tutorial.RATIO_HIGH <= Tutorial.RATIO_CAP, "the slider stops at half the army or less")
@@ -95,11 +93,21 @@ expect((Tutorial.step_index(Tutorial.FLOOR_FROM) or 0) > (Tutorial.step_index("g
 do
 	-- grow teaches expand, let the troops refill, expand again: never "keep tapping"
 	local g = Tutorial.STEPS[Tutorial.step_index("grow")]
-	for _, line in { g.touch, g.desktop, g.wait } do
+	for _, line in { g.touch, g.desktop, g.wait, g.early } do
 		expect(not string.find(string.lower(line), "keep"), "grow never says keep tapping: " .. line)
 	end
 	expect(type(g.wait) == "string" and #g.wait <= 40, "grow's wait line fits a phone's card")
+	expect(type(g.early) == "string" and #g.early <= 40, "and its too-early line")
 	expect(Tutorial.GROW_READY > 0.15 and Tutorial.GROW_READY < 0.5, "an expansion counts with the army part refilled")
+	expect(Tutorial.GROW_TAPS == 1, "one expansion once refilled: the step is short (2026-10-27)")
+	-- its bar fills towards ready, and doesn't slide back while the cap climbs under it
+	local need = Tutorial.GROW_READY * 100000
+	expect(Tutorial.refill(need * 0.5, 100000) == 0.5, "the bar: half way to ready")
+	expect(Tutorial.refill(need * 2, 100000) == 1, "full at ready and past it")
+	expect(Tutorial.refill(0, 100000) == 0 and Tutorial.refill(-5, 100000) == 0, "empty with no troops")
+	expect(Tutorial.refill(need * 0.5, 200000, 0.5) == 0.5, "the cap doubling doesn't take it back")
+	expect(Tutorial.refill(need * 0.25, 100000) == 0.25, "an order sent meanwhile does (no shown value)")
+	expect(Tutorial.refill(10, 0) == 1, "no cap yet: nothing to wait for")
 end
 
 -- a new player's floor after the tutorial: their first ROOKIE_MATCHES matches (2026-10-27)

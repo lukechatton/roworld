@@ -576,35 +576,40 @@ end
 --- Per frame (GDScript _process + _physics_process).
 function EventFeed.update(self, _delta: number)
 	local now = msec()
-	for _, c in ipairs(self._stack:get_children()) do
+	-- (the stack's own list, not a copy a frame: _remove only starts a fade, the node goes later)
+	for _, c in ipairs(self._stack.children) do
 		local e = c:get_meta("expire", nil)
 		if e ~= nil and now > e then
 			self:_remove(c)
 		end
 	end
-	-- Expiry bars on alliance cards.
+	-- Expiry bars on alliance cards (drawn again when they move a pixel, 2026-10-27).
 	if next(self._cards) == nil then
 		return
 	end
 	local tick = self.ctx:render_tick()
-	local done = {}
+	local done = nil
 	for from_id, card in pairs(self._cards) do
 		if card._freed then
+			done = done or {}
 			table.insert(done, from_id)
 		else
 			local start = card:get_meta("tick_start", tick)
 			local left = 1.0 - (tick - start) / math.max(card:get_meta("span", 1), 1)
 			local bar = card:get_meta("bar", nil)
 			if bar ~= nil then
-				bar:set_target(left, true)
+				bar:set_instant(left)
 			end
 			if left <= 0 then
+				done = done or {}
 				table.insert(done, from_id)
 			end
 		end
 	end
-	for _, id in ipairs(done) do
-		self:close_request(id)
+	if done ~= nil then
+		for _, id in ipairs(done) do
+			self:close_request(id)
+		end
 	end
 end
 

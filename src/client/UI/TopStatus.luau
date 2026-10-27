@@ -357,7 +357,8 @@ function TopStatus.refresh(self)
 		T.set_font_color(self._clock, T.TEXT)
 	end
 	self:_refresh_grace()
-	local ranking = s:ranking()
+	-- (the leader alone, from one pass: not the whole ranking sorted, 2026-10-27)
+	local leader = ctx:leader()
 	local me = ctx:me()
 	local my_share = if me ~= 0 then s:land_share(me) else 0.0
 	local mo = ctx:my()
@@ -374,8 +375,7 @@ function TopStatus.refresh(self)
 	self._bar.fill_color = mcol
 	self._bar:set_target(if me ~= 0 then ctx:win_share(me) else 0.0)
 	table.clear(self._bar.markers)
-	if #ranking > 0 then
-		local leader = ranking[1]
+	if leader ~= nil then
 		local ls = s:land_share(leader.id)
 		self._lead_box:set_visible(leader.id ~= me)
 		T.set_swatch_color(self._lead_sw, leader.color)

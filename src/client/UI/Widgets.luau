@@ -164,6 +164,9 @@ W.time = 0.0
 --- a button with `silent = true` never makes one.
 W.sound_serial = 0
 W.button_sound = nil :: ((string, any) -> ())?
+--- Bumped whenever a node joins a parent (add_child / _add_internal): UIRoot hooks the button sounds
+--- of a tree that changed, not of every node twice a second (2026-10-27).
+W.tree_serial = 0
 
 -- ---------------------------------------------------------------------------------------------
 -- Error isolation. Every unit of per-frame work (deferred call, timer, tweener callback, node
@@ -535,6 +538,7 @@ function Control.add_child(self, c, _legible: any?)
 		c.parent:remove_child(c)
 	end
 	table.insert(self.children, c)
+	W.tree_serial += 1
 	c.parent = self
 	c.gui.Parent = self:_content_gui()
 	c:_set_root(self.root)
@@ -551,6 +555,7 @@ end
 --- Internal child (part of a widget, not in `children`): laid out by its owner.
 function Control._add_internal(self, c)
 	table.insert(self._internal, c)
+	W.tree_serial += 1
 	c.parent = self
 	c.gui.Parent = self.gui
 	c:_set_root(self.root)

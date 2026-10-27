@@ -13,6 +13,12 @@
 --
 -- (2026-10-12: in the trailer's rail shot the train tracks looked poor; they
 -- were bars 0.4 of a tile wide, 2 px at a continent's zoom, and never the track.)
+-- (2026-10-27, "Script - Roads" was phones' second slow-frame cause: a pan moved every rail on the
+-- screen, one Position each, and a rail coming on or going off the screen handed every rail after it
+-- in the pool another run: six writes each. Now the rails sit in a frame placed at the map's origin
+-- (`_pan`), each where it is at this zoom, so a pan writes the frame alone; until the view has moved
+-- PAN_SLACK px no rail is even looked at (the rails that far off the screen are kept). A run or piece
+-- keeps its GUI object while it is drawn.)
 local RS = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local Airfront = RS:WaitForChild("Airfront")
@@ -58,6 +64,9 @@ RoadLayer.BORDER_DARKEN = 0.125
 RoadLayer.Z = 6
 --- Hidden bars kept for reuse.
 RoadLayer.POOL_SPARE = 64
+--- A pan this far (px) from where the rails were last laid out moves their frame and nothing else:
+--- the rails within PAN_SLACK of the screen's edges are drawn (not while zooming).
+RoadLayer.PAN_SLACK = 64
 
 --- A tile's rail kind, an index into KIND_ART
 local H, V, TL, TR, BL, BR = 1, 2, 3, 4, 5, 6
@@ -74,6 +83,7 @@ type Run = {
 	lm: number?,
 	rot: number?,
 	col: Color3?,
+	slot: number?,
 }
 
 --- A piece of the detailed track: the tiles x0..x1 x y0..y1 (one tile, or a straight stretch of one
@@ -88,15 +98,31 @@ type Piece = {
 	mu: number,
 	mv: number,
 	col: Color3?,
+	slot: number?,
 }
 
 --- A pool of GUI objects: what each was last given (written again only when it changes: a pan moves
 --- them and nothing else, a zoom sizes them; on a phone a late game's camera move rewrote six
 --- properties of every rail on screen each frame, 2026-10-12): its run or piece (and so its rotation
 --- or image), colour, transparency, size, and position (2026-10-26: the recolouring every RECOLOR_S
---- moved every rail on screen to where it already was).
+--- moved every rail on screen to where it already was). A slot keeps its run or piece while that is
+--- drawn (item.slot; 2026-10-27): `seen` the pass that last drew it, `free` the hidden slots, `holes`
+--- the slots whose object went, `top` the highest slot.
 local function new_pool()
-	return { items = {}, run = {}, col = {}, a = {}, w = {}, h = {}, x = {}, y = {} }
+	return {
+		items = {},
+		run = {},
+		col = {},
+		a = {},
+		w = {},
+		h = {},
+		x = {},
+		y = {},
+		seen = {},
+		free = {},
+		holes = {},
+		top = 0,
+	}
 end
 
 function RoadLayer.new(parent: Instance, view: any)
@@ -108,6 +134,17 @@ function RoadLayer.new(parent: Instance, view: any)
 	root.ZIndex = RoadLayer.Z
 	root.Parent = parent
 	self.root = root
+	--- the rails' frame: at the map's origin on the screen (whole px), the rails in it where they are
+	--- at this zoom
+	local pan = Instance.new("Frame")
+	pan.Name = "Pan"
+	pan.BackgroundTransparency = 1
+	pan.BorderSizePixel = 0
+	pan.Size = UDim2.fromOffset(0, 0)
+	pan.ZIndex = RoadLayer.Z
+	pan.Parent = root
+	self._pan = pan
+	self._px, self._py = 0, 0
 	self.view = view
 	self._state = nil :: any
 	--- the lines (Frames) and the detailed track (ImageLabels)
@@ -119,6 +156,13 @@ function RoadLayer.new(parent: Instance, view: any)
 	self._dirty = true
 	self._cam_version = -1
 	self._recolor = 0.0
+	--- the rails' last layout: its pass, zoom, viewport, the map's origin on the screen and how far
+	--- past the screen's edges it drew (PAN_SLACK, or 0 while zooming)
+	self._pass = 0
+	self._lay_s, self._lay_vp = -1.0, nil :: Vector2?
+	self._lay_x, self._lay_y, self._lay_slack = 0.0, 0.0, 0.0
+	--- runs and pieces the last layout drew
+	self._drawn = 0
 	--- owner -> rail colour, for one pass (see colour())
 	self._border = {} :: { [number]: Color3 }
 	return self
@@ -131,15 +175,70 @@ function RoadLayer.bind(self: any, state: any)
 	self._dirty = true
 end
 
+--- After a pass: the slots it did not draw (seen ~= pass) are hidden and free; the spares past
+--- POOL_SPARE go (a map zoomed out shows no rails, yet a late game's 1,300 bars were laid out again
+--- with the plates on every camera move).
+local function sweep(pool: any, pass: number)
+	local run, seen, free = pool.run, pool.seen, pool.free
+	for j = 1, pool.top do
+		-- (an object is shown exactly while it has a run: no need to ask Roblox)
+		if run[j] ~= nil and seen[j] ~= pass then
+			run[j] = nil
+			pool.items[j].Visible = false
+			table.insert(free, j)
+		end
+	end
+	while #free > RoadLayer.POOL_SPARE do
+		local j = table.remove(free) :: number
+		pool.items[j]:Destroy()
+		pool.items[j] = nil
+		pool.col[j], pool.a[j], pool.w[j], pool.h[j] = nil, nil, nil, nil
+		pool.x[j], pool.y[j], pool.seen[j] = nil, nil, nil
+		table.insert(pool.holes, j)
+	end
+end
+
+--- The slot of `pool` drawing `item` (a run or piece) this pass: its own while it stays drawn, else
+--- a free one, else a new slot (`items[j]` nil: the caller makes its object). `fresh`: the slot's
+--- object shows something else (or nothing) until this item is written into it.
+local function acquire(pool: any, item: any, pass: number): (number, boolean)
+	local j = item.slot
+	local fresh = j == nil or pool.run[j] ~= item
+	if fresh then
+		j = table.remove(pool.free)
+		if j == nil then
+			j = table.remove(pool.holes)
+			if j == nil then
+				pool.top += 1
+				j = pool.top
+			end
+		end
+		item.slot = j
+		pool.run[j] = item
+		pool.col[j] = nil
+		pool.a[j] = -1
+		pool.w[j] = -1
+		pool.x[j] = nil
+	end
+	pool.seen[j] = pass
+	return j :: number, fresh
+end
+
 function RoadLayer.unbind(self: any)
 	self._state = nil
 	table.clear(self._runs)
 	table.clear(self._pieces)
 	for _, pool in { self._bars, self._track } do
-		for _, b in pool.items do
-			b.Visible = false
-		end
-		table.clear(pool.run)
+		sweep(pool, -1)
+	end
+end
+
+--- The rails' frame at the map's origin on the screen, in whole px (written when that moved).
+function RoadLayer._place(self: any, ox: number, oy: number)
+	local x, y = math.round(ox), math.round(oy)
+	if x ~= self._px or y ~= self._py then
+		self._px, self._py = x, y
+		self._pan.Position = UDim2.fromOffset(x, y)
 	end
 end
 
@@ -334,26 +433,6 @@ local function off_screen(
 		)
 end
 
---- Hide pool items from n + 1 on; a few spares stay hidden, the rest go (a map zoomed out shows no
---- rails, yet a late game's 1,300 bars were laid out again with the plates on every camera move).
-local function trim(pool: any, n: number)
-	local items = pool.items
-	for j = #items, n + 1, -1 do
-		local b = items[j]
-		-- (an item is shown exactly while it has a run: no need to ask Roblox)
-		local shown = pool.run[j] ~= nil
-		pool.run[j] = nil
-		if j > n + RoadLayer.POOL_SPARE then
-			b:Destroy()
-			items[j] = nil
-			pool.col[j], pool.a[j], pool.w[j], pool.h[j] = nil, nil, nil, nil
-			pool.x[j], pool.y[j] = nil, nil
-		elseif shown then
-			b.Visible = false
-		end
-	end
-end
-
 --- A run's or piece's colour: the land under its middle tile, looked up again when `recolor` (else
 --- kept), the border colours of the pass in `border` (owner -> colour).
 local function colour(
@@ -394,17 +473,45 @@ function RoadLayer.tick(self: any, dt: number)
 	if not self._dirty and cam.version == self._cam_version and self._recolor > 0 then
 		return
 	end
+	self._cam_version = cam.version
+	local ax, ay = cam:anchor()
+	local s, cu, cv = cam.scale, cam.cu, cam.cv
+	local vp = cam._vp
+	-- the map's origin on the screen: the rails' frame goes there; a pan that keeps within the last
+	-- layout's slack (same zoom, same viewport) moves it and nothing else
+	local ox, oy = ax - cu * s, ay - cv * s
+	local lay_slack = self._lay_slack
+	if
+		not self._dirty
+		and self._recolor > 0
+		and s == self._lay_s
+		and vp == self._lay_vp
+		and math.abs(ox - self._lay_x) <= lay_slack
+		and math.abs(oy - self._lay_y) <= lay_slack
+	then
+		-- (no rail shown, zoomed out: not even the frame)
+		if self._drawn > 0 then
+			self:_place(ox, oy)
+		end
+		return
+	end
+	self:_place(ox, oy)
+	-- (while the zoom changes every rail is written again each frame: none past the screen then)
+	local slack = if s == self._lay_s then RoadLayer.PAN_SLACK else 0
 	local recolor_due = self._recolor <= 0 or self._dirty
 	if recolor_due then
 		self._recolor = RoadLayer.RECOLOR_S
 	end
 	self._dirty = false
-	self._cam_version = cam.version
+	self._lay_s, self._lay_vp, self._lay_x, self._lay_y, self._lay_slack = s, vp, ox, oy, slack
+	self._pass += 1
+	local pass = self._pass
+	local drawn = 0
 	local k = tonumber(st.map and st.map.k_lin) or Rules.K_LIN
 	local dpr = RoadLayer.device_ratio()
 	local zoom = cam.scale / k * dpr
 	local a = math.clamp((zoom - (RoadLayer.MIN_ZOOM - RoadLayer.FADE_RANGE)) / RoadLayer.FADE_RANGE, 0, 1)
-	local n_bars, n_track = 0, 0
+	local bars, track = self._bars, self._track
 	if a > 0.01 then
 		local W = st.map.W
 		local detail = zoom >= RoadLayer.DETAIL_ZOOM
@@ -426,11 +533,8 @@ function RoadLayer.tick(self: any, dt: number)
 		local recolor = recolor_due
 		local border = self._border
 		table.clear(border)
-		local ax, ay = cam:anchor()
-		local s, cu, cv = cam.scale, cam.cu, cam.cv
-		local vp = cam._vp
 		local vw, vh = vp.X, vp.Y
-		local bars, track = self._bars, self._track
+		local pan = self._pan
 		for rid, r in st.roads do
 			if detail then
 				local pieces = self._pieces[rid]
@@ -439,7 +543,7 @@ function RoadLayer.tick(self: any, dt: number)
 					self._pieces[rid] = pieces
 				end
 				-- a railroad off the screen as a whole: none of its pieces is looked at
-				if off_screen((pieces :: any).bbox, ax, ay, s, cu, cv, vw, vh, 0) then
+				if off_screen((pieces :: any).bbox, ax, ay, s, cu, cv, vw, vh, slack) then
 					continue
 				end
 				-- (by index: `pieces.bbox` is a field of the same table)
@@ -448,12 +552,14 @@ function RoadLayer.tick(self: any, dt: number)
 					local tw, th = pc.x1 - pc.x0 + 1, pc.y1 - pc.y0 + 1
 					local w, h = tw * s, th * s
 					local mx, my = ax + (pc.mu - cu) * s, ay + (pc.mv - cv) * s
-					if mx < -w * 0.5 or my < -h * 0.5 or mx > vw + w * 0.5 or my > vh + h * 0.5 then
+					local mw, mh = w * 0.5 + slack, h * 0.5 + slack
+					if mx < -mw or my < -mh or mx > vw + mw or my > vh + mh then
 						continue
 					end
 					local col = colour(st, pc, recolor, me, mine, border)
-					n_track += 1
-					local b = track.items[n_track]
+					drawn += 1
+					local j, fresh = acquire(track, pc, pass)
+					local b = track.items[j]
 					if b == nil then
 						b = Instance.new("ImageLabel")
 						b.Name = "Track"
@@ -462,15 +568,10 @@ function RoadLayer.tick(self: any, dt: number)
 						b.BorderSizePixel = 0
 						b.ResampleMode = Enum.ResamplerMode.Pixelated
 						b.ZIndex = RoadLayer.Z
-						b.Parent = self.root
-						track.items[n_track] = b
+						b.Parent = pan
+						track.items[j] = b
 					end
-					if track.run[n_track] ~= pc then
-						track.run[n_track] = pc
-						track.col[n_track] = nil :: any
-						track.a[n_track] = -1
-						track.w[n_track] = -1
-						track.x[n_track] = nil
+					if fresh then
 						b.Visible = true
 						b.Image = RailArt[KIND_ART[pc.kind]]
 						-- a stretch repeats the tile once per tile (TileSize in scale: exact whatever the
@@ -482,20 +583,22 @@ function RoadLayer.tick(self: any, dt: number)
 							b.ScaleType = Enum.ScaleType.Stretch
 						end
 					end
-					if track.col[n_track] ~= col then
-						track.col[n_track] = col
+					if track.col[j] ~= col then
+						track.col[j] = col
 						b.ImageColor3 = col
 					end
-					if track.a[n_track] ~= a then
-						track.a[n_track] = a
+					if track.a[j] ~= a then
+						track.a[j] = a
 						b.ImageTransparency = 1 - a
 					end
-					if track.x[n_track] ~= mx or track.y[n_track] ~= my then
-						track.x[n_track], track.y[n_track] = mx, my
-						b.Position = UDim2.fromOffset(mx, my)
+					-- (in the rails' frame: where it is at this zoom)
+					local x, y = pc.mu * s, pc.mv * s
+					if track.x[j] ~= x or track.y[j] ~= y then
+						track.x[j], track.y[j] = x, y
+						b.Position = UDim2.fromOffset(x, y)
 					end
-					if track.w[n_track] ~= w or track.h[n_track] ~= h then
-						track.w[n_track], track.h[n_track] = w, h
+					if track.w[j] ~= w or track.h[j] ~= h then
+						track.w[j], track.h[j] = w, h
 						b.Size = UDim2.fromOffset(w, h)
 					end
 				end
@@ -507,7 +610,7 @@ function RoadLayer.tick(self: any, dt: number)
 				self._runs[rid] = runs
 			end
 			-- a railroad off the screen as a whole: none of its runs is looked at
-			if off_screen((runs :: any).bbox, ax, ay, s, cu, cv, vw, vh, thick) then
+			if off_screen((runs :: any).bbox, ax, ay, s, cu, cv, vw, vh, thick + slack) then
 				continue
 			end
 			-- (by index: `runs.bbox` is a field of the same table, and `for _, run in runs` met it
@@ -517,55 +620,53 @@ function RoadLayer.tick(self: any, dt: number)
 				local run = runs[i]
 				local len = run.lm * s
 				local mx, my = ax + (run.mu - cu) * s, ay + (run.mv - cv) * s
-				local m = len * 0.5 + thick
+				local m = len * 0.5 + thick + slack
 				if mx < -m or my < -m or mx > vw + m or my > vh + m then
 					continue
 				end
 				local col = colour(st, run, recolor, me, mine, border)
-				n_bars += 1
-				local b = bars.items[n_bars]
+				drawn += 1
+				local j, fresh = acquire(bars, run, pass)
+				local b = bars.items[j]
 				if b == nil then
 					b = Instance.new("Frame")
 					b.Name = "Rail"
 					b.AnchorPoint = Vector2.new(0.5, 0.5)
 					b.BorderSizePixel = 0
 					b.ZIndex = RoadLayer.Z
-					b.Parent = self.root
-					bars.items[n_bars] = b
+					b.Parent = pan
+					bars.items[j] = b
 				end
-				if bars.run[n_bars] ~= run then
-					bars.run[n_bars] = run
-					bars.col[n_bars] = nil :: any
-					bars.a[n_bars] = -1
-					bars.w[n_bars] = -1
-					bars.x[n_bars] = nil
+				if fresh then
 					b.Visible = true
 					b.Rotation = run.rot
 				end
-				if bars.col[n_bars] ~= col then
-					bars.col[n_bars] = col
+				if bars.col[j] ~= col then
+					bars.col[j] = col
 					b.BackgroundColor3 = col
 				end
-				if bars.a[n_bars] ~= line_a then
-					bars.a[n_bars] = line_a
+				if bars.a[j] ~= line_a then
+					bars.a[j] = line_a
 					b.BackgroundTransparency = 1 - line_a
 				end
-				if bars.x[n_bars] ~= mx or bars.y[n_bars] ~= my then
-					bars.x[n_bars], bars.y[n_bars] = mx, my
-					b.Position = UDim2.fromOffset(mx, my)
+				local x, y = run.mu * s, run.mv * s
+				if bars.x[j] ~= x or bars.y[j] ~= y then
+					bars.x[j], bars.y[j] = x, y
+					b.Position = UDim2.fromOffset(x, y)
 				end
 				-- a run spans its end tiles' centres; half a thickness more each way closes the corners
 				-- (corner tiles: two half-segments meeting at the centre)
 				local w = len + thick
-				if bars.w[n_bars] ~= w or bars.h[n_bars] ~= thick then
-					bars.w[n_bars], bars.h[n_bars] = w, thick
+				if bars.w[j] ~= w or bars.h[j] ~= thick then
+					bars.w[j], bars.h[j] = w, thick
 					b.Size = UDim2.fromOffset(w, thick)
 				end
 			end
 		end
 	end
-	trim(self._bars, n_bars)
-	trim(self._track, n_track)
+	sweep(bars, pass)
+	sweep(track, pass)
+	self._drawn = drawn
 end
 
 return RoadLayer

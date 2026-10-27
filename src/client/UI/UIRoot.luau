@@ -1361,8 +1361,17 @@ function UIRoot._sig(self, obj: any, sig: string, cb: (...any) -> ())
 end
 
 --- Button sounds (GDScript _on_node_added): click on press, soft hover on desktop. The kit tree
---- has no node_added signal, so new buttons are hooked on layout / every half second.
+--- has no node_added signal, so new buttons are hooked on layout / every half second: the whole tree
+--- only when a node joined it since (W.tree_serial; 2026-10-27: it walked every node of every screen,
+--- a thousand and more, twice a second, for nothing new nearly every time).
 function UIRoot._hook_buttons(self, n: any)
+	local serial = W.tree_serial
+	if n == self.root then
+		if serial == self._hooked_serial then
+			return
+		end
+		self._hooked_serial = serial
+	end
 	local ctx = self.ctx
 	local BuildButton = kit("BuildButton")
 	local Leaderboard = self.board and getmetatable(self.board)
@@ -1370,7 +1379,7 @@ function UIRoot._hook_buttons(self, n: any)
 		if node._freed then
 			return
 		end
-		if node.pressed ~= nil and node.gui ~= nil and node.gui:IsA("GuiButton") and not node._sfx_hooked then
+		if not node._sfx_hooked and node.pressed ~= nil and node.gui ~= nil and node.gui:IsA("GuiButton") then
 			node._sfx_hooked = true
 			local quiet = (BuildButton ~= nil and getmetatable(node) == BuildButton.__mt)
 				or (node.__row_of_leaderboard == true)
@@ -2476,7 +2485,11 @@ function UIRoot._poll_layout(self)
 			math.max(self.board:bottom_edge(), if self.top.visible then self.top:bottom_edge() else 0.0) + 10.0,
 			(if bar.visible then bar:top_edge() else vp.Y - ctx.insets.w) - 8.0
 		)
-		self:_layout_alert()
+		-- (a hidden alert is placed when it comes up, UIAdvisor -> relayout_alert: here its two fixed-width
+		-- labels were drawn again glyph by glyph twice a second, 2026-10-27)
+		if self.alert.visible then
+			self:_layout_alert()
+		end
 		self.probe:update_world_safe_area()
 	end
 	self:_hook_buttons(self.root)

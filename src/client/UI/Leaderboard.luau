@@ -469,17 +469,10 @@ end
 --- My rank (1-based) for other panels; 0 when unranked.
 function Leaderboard.my_rank(self): number
 	local ctx = self.ctx
-	local s = ctx.state
-	if s == nil or ctx:me() == 0 then
+	if ctx.state == nil or ctx:me() == 0 then
 		return 0
 	end
-	local r = s:ranking()
-	for i, o in ipairs(r) do
-		if o.id == ctx:me() then
-			return i
-		end
-	end
-	return 0
+	return ctx:rank_of(ctx:me())
 end
 
 function Leaderboard.mark_dirty(self)
@@ -488,16 +481,23 @@ end
 
 function Leaderboard.refresh(self)
 	local ctx = self.ctx
-	local T = UITheme
 	self._dirty = false
 	local s = ctx.state
 	if s == nil then
 		return
 	end
-	local ranking = s:ranking()
 	local admin = ctx.session ~= nil and ctx.session.admin_bots ~= nil
 	self._humans_btn:set_visible(admin)
 	local humans_only = admin and self.humans_only
+	-- Closed (every match starts so): only the pill can show (not on a phone); the rows and the panel
+	-- are filled when it opens (set_open). (2026-10-27: a closed board sorted the ranking, filled its
+	-- hidden rows and laid its hidden panel out every second.)
+	if not self.expanded and not humans_only then
+		local me = ctx:me()
+		self:_set_pill(if me ~= 0 then ctx:rank_of(me) else 0, ctx:leader())
+		return
+	end
+	local ranking = s:ranking()
 	if humans_only then
 		local only = {}
 		for _, o in ipairs(ranking) do
@@ -564,19 +564,30 @@ function Leaderboard.refresh(self)
 	end
 	self:_refresh_teams()
 	self._count:set_text(string.format(if humans_only then "%d humans" else "%d alive", #ranking))
+	self:_set_pill(my_rank, ranking[1])
+	self.panel:reset_size()
+end
+
+--- The pill: my rank (`my_rank` > 0) and land, else the leader's name (cut to 10 characters) and
+--- land. (Written when it changed: a button's text lays the HUD out again even when it is the same.)
+function Leaderboard._set_pill(self, my_rank: number, leader: any)
+	local ctx = self.ctx
+	local T = UITheme
+	local s = ctx.state
+	local text = "Leaderboard"
 	if my_rank > 0 then
-		self._pill:set_text(string.format("#%d  ·  %s", my_rank, T.fmt_pct(s:land_share(me))))
-	elseif #ranking > 0 then
-		local nm = ranking[1].name
+		text = string.format("#%d  ·  %s", my_rank, T.fmt_pct(s:land_share(ctx:me())))
+	elseif leader ~= nil then
+		local nm = leader.name
 		if utf8.len(nm) and (utf8.len(nm) :: number) > 10 then
 			local cut = utf8.offset(nm, 10)
 			nm = string.sub(nm, 1, (cut or 10) - 1) .. "…"
 		end
-		self._pill:set_text(string.format("%s  %s", nm, T.fmt_pct(s:land_share(ranking[1].id))))
-	else
-		self._pill:set_text("Leaderboard")
+		text = string.format("%s  %s", nm, T.fmt_pct(s:land_share(leader.id)))
 	end
-	self.panel:reset_size()
+	if text ~= self._pill.text then
+		self._pill:set_text(text)
+	end
 end
 
 --- A team game (Core/Teams): the teams above the players, by land: the

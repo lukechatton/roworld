@@ -306,6 +306,9 @@ end
 
 --- Full recount (on bind / when the local owner changes). Everything else is incremental.
 function UIRules.recount(self: any)
+	if self._m ~= nil then
+		self._m.state = nil
+	end
 	self._scount = table.create(Defs.STRUCT_KIND_COUNT, 0)
 	self._scount[0] = 0
 	self._warships = 0
@@ -337,6 +340,9 @@ function UIRules.on_structure(self: any, kind: number, old_owner: number, new_ow
 	local me = self.ctx:me()
 	if me == 0 or kind < 0 or kind >= Defs.STRUCT_KIND_COUNT then
 		return false
+	end
+	if self._m ~= nil then
+		self._m.state = nil
 	end
 	if self._counted_owner ~= me then
 		self:recount()
@@ -411,6 +417,73 @@ function UIRules.owned(self: any, kind: string): number
 	return n
 end
 
+--- The local player's structures by kind, from one pass over the match's, kept while the frame is
+--- the same (state, tick, render tick and owner): per kind (index kind + 1) the level sum, the
+--- finished and building counts, the seconds until the first one building finishes, and the
+--- structures themselves. (2026-10-27: the build slots refresh 2-4 times a second and each slot made
+--- its own passes, ~17 over every structure in the match per refresh: costs, silos, launchers. The
+--- answers are the same.)
+function UIRules._mine(self: any, s: any): any
+	local me = self.ctx:me()
+	local m = self._m
+	if m == nil then
+		local n = Defs.STRUCT_KIND_COUNT
+		m = { level = table.create(n, 0), act = table.create(n, 0), building = table.create(n, 0) }
+		m.soonest = table.create(n, math.huge)
+		m.list = {}
+		for k = 1, n do
+			m.list[k] = {}
+		end
+		self._m = m
+	elseif m.state == s and m.tick == s.tick and m.rt == s.render_tick and m.me == me then
+		return m
+	end
+	m.state, m.tick, m.rt, m.me = s, s.tick, s.render_tick, me
+	local level, act, building, soonest, list = m.level, m.act, m.building, m.soonest, m.list
+	for k = 1, Defs.STRUCT_KIND_COUNT do
+		level[k], act[k], building[k], soonest[k] = 0, 0, 0, math.huge
+		table.clear(list[k])
+	end
+	local tick = s.tick
+	for _, st in s.structures do
+		local k = st.kind
+		if st.owner ~= me or k < 0 or k >= Defs.STRUCT_KIND_COUNT then
+			continue
+		end
+		k += 1
+		level[k] += st.level
+		if st.active_tick > tick then
+			building[k] += 1
+			soonest[k] = math.min(soonest[k], (st.active_tick - tick) / Defs.TICK_RATE)
+		else
+			act[k] += 1
+		end
+		table.insert(list[k], st)
+	end
+	return m
+end
+
+--- What Rules.cost_of reads the state through: the local player's level sums from _mine, the rest
+--- from the state itself.
+function UIRules._cost_view(self: any, s: any): any
+	local view = self._view
+	if view == nil then
+		local mt = { __index = s }
+		view = setmetatable({
+			struct_level_sum = function(_, id: number, kind: number): number
+				local st = mt.__index
+				if id == self.ctx:me() and kind >= 0 and kind < Defs.STRUCT_KIND_COUNT then
+					return self:_mine(st).level[kind + 1]
+				end
+				return st:struct_level_sum(id, kind)
+			end,
+		}, mt)
+		self._view, self._view_mt = view, mt
+	end
+	self._view_mt.__index = s
+	return view
+end
+
 --- Gold for the next `kind` (structures, upgrades, warships, nukes) — Rules.cost_of, the Sim's
 --- own pricing (shared port/factory count, levels, worldwide MIRV launches).
 function UIRules.cost(self: any, kind: string): number
@@ -421,7 +494,7 @@ function UIRules.cost(self: any, kind: string): number
 	if ctx.state == nil then
 		return UIRules.rules_cost(kind, 0)
 	end
-	return Rules().cost_of(ctx.state, ctx:me(), kind)
+	return Rules().cost_of(self:_cost_view(ctx.state), ctx:me(), kind)
 end
 
 --- The local player's finished structures of `kind` that can fire now (a silo's loaded missiles, an
@@ -431,12 +504,12 @@ function UIRules.ready_launchers(self: any, kind: number): (number, number)
 	if s == nil then
 		return 0, 0.0
 	end
-	local me = self.ctx:me()
 	local cd = Rules().RELOAD_TICKS[kind] or 0
 	local n = 0
 	local soonest = math.huge
-	for _, st in s.structures do
-		if st.owner == me and st.kind == kind and st.active_tick <= s.tick then
+	local mine = if kind >= 0 and kind < Defs.STRUCT_KIND_COUNT then self:_mine(s).list[kind + 1] else {}
+	for _, st in mine do
+		if st.active_tick <= s.tick then
 			local busy = 0
 			local first = math.huge
 			for _, t in st.shots or {} do
@@ -458,27 +531,14 @@ end
 --- Finished (active) structures of `kind` the local player owns — silos must be built before a
 --- nuke can fly. Returns active, under_construction, seconds until the first one finishes.
 function UIRules.active_structs(self: any, kind: number): (number, number, number)
-	local ctx = self.ctx
-	local s = ctx.state
-	local act = 0
-	local building = 0
-	local soonest = math.huge
-	if s == nil then
+	local s = self.ctx.state
+	if s == nil or kind < 0 or kind >= Defs.STRUCT_KIND_COUNT then
 		return 0, 0, 0.0
 	end
-	local me = ctx:me()
-	for _, st in s.structures do
-		if st.owner ~= me or st.kind ~= kind then
-			continue
-		end
-		if st.active_tick > s.tick then
-			building += 1
-			soonest = math.min(soonest, (st.active_tick - s.tick) / Defs.TICK_RATE)
-		else
-			act += 1
-		end
-	end
-	return act, building, if building > 0 then soonest else 0.0
+	local m = self:_mine(s)
+	local k = kind + 1
+	local building = m.building[k]
+	return m.act[k], building, if building > 0 then m.soonest[k] else 0.0
 end
 
 --- {ok, locked, reason, cost} — whether the action can be used right now (ignores the target).

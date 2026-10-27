@@ -19,7 +19,15 @@
 -- EditableImage update a frame), unless it has waited SKIP_MAX frames. (2026-10-26, phones' slow
 -- frames: its lists, noise and buffers are kept from one draw to the next, and the label is placed
 -- again only when the camera moved.)
+-- (2026-10-27, "Script - Fallout Glow" led phones' slow frames: a MIRV's or a few far-apart nukes'
+-- box is most of the image, and it was blurred whole every draw (a MIRV: ~32 ms a draw on a Mac,
+-- interpreted). Now only what the view can reach is drawn (`_win`: the view's blocks and a quarter
+-- view more each way, drawn again at once when the view leaves it for glow not drawn), the blur goes
+-- over the rows with glow and the columns it reaches, sliding along them (one read a cell, not five),
+-- a block's hashes are worked out once, phones redraw at UPDATE_S_MOBILE and a long draw waits DUTY
+-- times as long. The pixels drawn are the same.)
 local AssetService = game:GetService("AssetService")
+local UserInputService = game:GetService("UserInputService")
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Defs = require(Airfront:WaitForChild("Core"):WaitForChild("Defs")) :: any
@@ -58,8 +66,17 @@ FalloutGlow.PARTICLE_FRESH_SCALE = 0.2
 FalloutGlow.BLUR = { 0.375, 0.25, 0.0625 }
 -- pacing
 FalloutGlow.UPDATE_S = 1 / 20
+--- Phones (touch, no keyboard): the glow changes over seconds, only its dots flicker faster
+FalloutGlow.UPDATE_S_MOBILE = 1 / 12
+--- The next draw waits at least DUTY times as long as this one took (a slow phone's glow takes at
+--- most 1 / DUTY of its time, not every frame)
+FalloutGlow.DUTY = 8
 FalloutGlow.NOISE_BUDGET_S = 0.0015
 FalloutGlow.SKIP_MAX = 2
+--- The window drawn: the view's blocks and CUSHION more each way (the linear filter and a frame of
+--- panning), then a quarter of the view (at least WIN_MIN blocks) more each way
+FalloutGlow.CUSHION = 2
+FalloutGlow.WIN_MIN = 4
 FalloutGlow.Z = 1 -- in the overlay, under the rails
 
 local F_FALLOUT: number = Defs.F_FALLOUT
@@ -145,7 +162,29 @@ function FalloutGlow.new(parent: Instance, view: any)
 	self._out_cells = -1
 	self._zero = nil :: buffer?
 	self._zero_cells = -1
+	--- block -> its dot's hashes (from where it is: worked out once)
+	self._h1 = {} :: { [number]: number }
+	self._h2 = {} :: { [number]: number }
+	--- the last draw's box: the hot blocks and the blur's 2 blocks either side (i1 < i0: none)
+	self._fb = { 0, 0, -1, -1 }
+	--- the blocks the view can reach (i0, j0, i1, j1; none until the first tick), and per row of a
+	--- draw's work box its first and last column with glow
+	self._win = { 0, 0, -1, -1 }
+	self._rlo = {} :: { number }
+	self._rhi = {} :: { number }
+	--- and per column the first and last row blurred across
+	self._cf = {} :: { number }
+	self._cl = {} :: { number }
+	--- label.Visible as last written
+	self._vis = false
 	return self
+end
+
+function FalloutGlow._show(self: any, on: boolean)
+	if self._vis ~= on then
+		self._vis = on
+		self.label.Visible = on
+	end
 end
 
 function FalloutGlow.bind(self: any, state: any)
@@ -158,7 +197,7 @@ function FalloutGlow.unbind(self: any)
 	table.clear(self._hot)
 	table.clear(self._was)
 	table.clear(self._noise)
-	self.label.Visible = false
+	self:_show(false)
 end
 
 function FalloutGlow.destroy(self: any)
@@ -179,8 +218,14 @@ function FalloutGlow._reset(self: any)
 	table.clear(self._hot)
 	table.clear(self._was)
 	table.clear(self._noise)
-	self._box = nil
-	self.label.Visible = false
+	table.clear(self._h1)
+	table.clear(self._h2)
+	-- (cleared, not forgotten: a match that ended glowing left its pixels for the next one's first
+	-- glow to show where that one's box did not reach)
+	self:_clear_box()
+	self._win[3], self._win[4] = -1, -1
+	self._fb[3] = -1
+	self:_show(false)
 	local st = self._state
 	if st == nil or st.map == nil or st.flags == nil then
 		return
@@ -264,9 +309,16 @@ function FalloutGlow.on_flags_changed(self: any, changed: { number })
 	self._next = 0
 end
 
---- The glow of block `b` (centre tile cx, cy) at heat `heat`, tick `rt`: premultiplied rgba,
---- each in 0..1. `nz` = { broil noise, meta noise } (worked out when nil or stale).
-local function extract(cx: number, cy: number, heat: number, rt: number, nz: { number }, owned: boolean)
+--- A block's dot hashes from its centre (cx, cy): h1 its colour and rate, h2 whether it has one.
+local function hashes(cx: number, cy: number): (number, number)
+	-- (tile coordinates of the centre tile)
+	local tx, ty = cx - 0.5, cy - 0.5
+	return fract(sin(tx * 12.9898 + ty * 78.233) * 43758.5453), fract(sin(tx * 63.7 + ty * 157.3) * 23421.631)
+end
+
+--- The glow of a block at heat `heat`, tick `rt`: premultiplied rgba,
+--- each in 0..1. `nz` = { broil noise, meta noise } (worked out when nil or stale), h1 / h2 its hashes.
+local function extract(heat: number, rt: number, nz: { number }, owned: boolean, h1: number, h2: number)
 	local G = FalloutGlow
 	local lo = mix(G.CONTRAST_LO_COLD, G.CONTRAST_LO_HOT, heat)
 	local hi = mix(G.CONTRAST_HI_COLD, G.CONTRAST_HI_HOT, heat)
@@ -277,11 +329,8 @@ local function extract(cx: number, cy: number, heat: number, rt: number, nz: { n
 	local s = broil * intensity * opacity
 	local col = G.BLOOM
 	local r, g, bb, a = col[1] * s, col[2] * s, col[3] * s, s
-	-- the particle dots (tile coordinates of the centre tile)
-	local tx, ty = cx - 0.5, cy - 0.5
-	local h1 = fract(sin(tx * 12.9898 + ty * 78.233) * 43758.5453)
-	local h2 = fract(sin(tx * 63.7 + ty * 157.3) * 23421.631)
-	if h2 > (if owned then G.PARTICLE_THRESHOLD_OWNED else G.PARTICLE_THRESHOLD_UNOWNED) then
+	-- the particle dots
+	if h2 >(if owned then G.PARTICLE_THRESHOLD_OWNED else G.PARTICLE_THRESHOLD_UNOWNED) then
 		local rate = G.PARTICLE_FLICKER_SPEED * (0.4 + h1 * 1.2)
 		local flick = math.max(0.0, sin(rt * rate + h1 * 12.0) * 0.8 + 0.2)
 		flick *= flick
@@ -309,15 +358,35 @@ local function noise_of(cx: number, cy: number, heat: number, rt: number, into: 
 	return { n1 * 0.6 + n2 * 0.4, meta }
 end
 
---- The blur down at a pixel (its index and those 1 and 2 rows either side) for channel byte `c`,
---- times COVERAGE and clamped to 0..1, as laid over the map.
-local function vblur(tmp: buffer, p: number, a1: number, b1: number, a2: number, b2: number, c: number): number
-	local w0, w1, w2 = FalloutGlow.BLUR[1], FalloutGlow.BLUR[2], FalloutGlow.BLUR[3]
-	local readf32 = buffer.readf32
-	local acc = readf32(tmp, p * 16 + c) * w0
-		+ (readf32(tmp, a1 * 16 + c) + readf32(tmp, b1 * 16 + c)) * w1
-		+ (readf32(tmp, a2 * 16 + c) + readf32(tmp, b2 * 16 + c)) * w2
-	return math.min(1, acc * FalloutGlow.COVERAGE)
+--- The window follows the view: when the view's blocks (and CUSHION) leave it, or it is far bigger
+--- than they are (zoomed in), it is made again around them, a quarter of the view more each way.
+--- True when that shows glow the last draw did not (a draw is due now).
+function FalloutGlow._follow_view(self: any, cam: any): boolean
+	local S, c = FalloutGlow.SCALE, FalloutGlow.CUSHION
+	local u0, v0, u1, v1 = cam:visible_rect()
+	local vi0, vj0, vi1, vj1 = floor(u0 / S) - c, floor(v0 / S) - c, floor(u1 / S) + c, floor(v1 / S) + c
+	local win = self._win
+	local left = vi0 < win[1] or vj0 < win[2] or vi1 > win[3] or vj1 > win[4]
+	local vw, vh = vi1 - vi0 + 1, vj1 - vj0 + 1
+	if left or win[3] - win[1] + 1 > 3 * vw or win[4] - win[2] + 1 > 3 * vh then
+		local mi, mj = math.max(FalloutGlow.WIN_MIN, vw // 4), math.max(FalloutGlow.WIN_MIN, vh // 4)
+		win[1], win[2], win[3], win[4] = vi0 - mi, vj0 - mj, vi1 + mi, vj1 + mj
+	end
+	if not left then
+		return false
+	end
+	-- the glow's box (as of the last draw) where the view now is, and whether that was drawn
+	local fb = self._fb
+	if fb[3] < fb[1] then
+		return false
+	end
+	local i0, j0 = math.max(vi0, fb[1]), math.max(vj0, fb[2])
+	local i1, j1 = math.min(vi1, fb[3]), math.min(vj1, fb[4])
+	if i1 < i0 or j1 < j0 then
+		return false
+	end
+	local box = self._box
+	return box == nil or i0 < box[1] or j0 < box[2] or i1 > box[3] or j1 > box[4]
 end
 
 function FalloutGlow.tick(self: any, _dt: number)
@@ -329,8 +398,8 @@ function FalloutGlow.tick(self: any, _dt: number)
 	local cam = self.view.rig
 	local W, H = st.map.W or Defs.W, st.map.H or Defs.H
 	if next(self._hot) == nil then
-		if label.Visible then
-			label.Visible = false
+		if self._vis then
+			self:_show(false)
 			self:_clear_box()
 		end
 		return
@@ -347,6 +416,10 @@ function FalloutGlow.tick(self: any, _dt: number)
 		label.Size = UDim2.fromOffset(x1 - x0, y1 - y0)
 	end
 	local now = FrameClock.now()
+	-- (the view about to show what was not drawn: drawn now)
+	if self:_follow_view(cam) then
+		self._next = 0
+	end
 	if now < self._next then
 		return
 	end
@@ -356,9 +429,16 @@ function FalloutGlow.tick(self: any, _dt: number)
 		return
 	end
 	self._skipped = 0
-	self._next = now + FalloutGlow.UPDATE_S
+	local t0 = os.clock()
 	self:_draw(st, W)
-	label.Visible = true
+	local wait = if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+		then FalloutGlow.UPDATE_S_MOBILE
+		else FalloutGlow.UPDATE_S
+	-- (not while a Studio film steps the clock: its frames take real time the film does not)
+	if FrameClock.film == nil then
+		wait = math.max(wait, (os.clock() - t0) * FalloutGlow.DUTY)
+	end
+	self._next = now + wait
 end
 
 function FalloutGlow._clear_box(self: any)
@@ -385,58 +465,102 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 	local rt = st.render_tick or st.tick or 0
 	local own = st.owner
 	local decay = G.HEAT_DECAY_PER_TICK / 255
+	local hot, noise = self._hot, self._noise
 	-- the hot blocks (the cold ones go) and their box (into the other list, swapped with this one)
 	local order = self._order
 	local live = self._live
 	table.clear(live)
+	local n, missing = 0, 0
 	local i0, j0, i1, j1 = math.huge, math.huge, -1, -1
 	for _, b in order do
-		local t0 = self._hot[b]
+		local t0 = hot[b]
 		if t0 == nil then
 			continue
 		end
 		local heat = 1 - (rt - t0) * decay
 		if heat <= 0 then
-			self._hot[b] = nil
-			self._noise[b] = nil
+			hot[b] = nil
+			noise[b] = nil
 			continue
 		end
-		table.insert(live, b)
+		n += 1
+		live[n] = b
+		if noise[b] == nil then
+			missing += 1
+		end
 		local i, j = b % bw, b // bw
-		i0, j0 = math.min(i0, i), math.min(j0, j)
-		i1, j1 = math.max(i1, i), math.max(j1, j)
+		if i < i0 then
+			i0 = i
+		end
+		if i > i1 then
+			i1 = i
+		end
+		if j < j0 then
+			j0 = j
+		end
+		if j > j1 then
+			j1 = j
+		end
 	end
 	self._order, self._live = live, order
-	if #live == 0 then
+	local fb = self._fb
+	if n == 0 then
+		fb[3] = -1
 		self:_clear_box()
-		self.label.Visible = false
+		self:_show(false)
 		return
 	end
-	-- the noise: as many blocks as the budget allows, round robin; a block without any first
+	fb[1], fb[2], fb[3], fb[4] = math.max(0, i0 - 2), math.max(0, j0 - 2), math.min(bw - 1, i1 + 2), math.min(bh - 1, j1 + 2)
+	-- the noise: as many blocks as the budget allows, round robin; a block without any first (past
+	-- the budget only those: the clock is not asked again, and the loop stops when none is left)
 	local deadline = os.clock() + G.NOISE_BUDGET_S
-	local n = #live
+	local spent = false
 	local rr = ((self._rr - 1) % n) + 1
 	for k = 0, n - 1 do
 		local b = live[(rr + k - 1) % n + 1]
-		local nz = self._noise[b]
-		if nz ~= nil and os.clock() > deadline then
-			continue
+		local nz = noise[b]
+		if nz ~= nil then
+			if spent then
+				continue
+			elseif os.clock() > deadline then
+				spent = true
+				if missing == 0 then
+					break
+				end
+				continue
+			end
+		else
+			missing -= 1
 		end
-		local heat = 1 - (rt - self._hot[b]) * decay
+		local heat = 1 - (rt - hot[b]) * decay
 		local cx, cy = (b % bw) * S + half + 0.5, (b // bw) * S + half + 0.5
-		self._noise[b] = noise_of(cx, cy, heat, rt, nz)
+		noise[b] = noise_of(cx, cy, heat, rt, nz)
 		self._rr = (rr + k) % n + 1
+		if spent and missing == 0 then
+			break
+		end
 	end
-	-- the box, 2 blocks of blur either side, inside the image
-	i0, j0 = math.max(0, i0 - 2), math.max(0, j0 - 2)
-	i1, j1 = math.min(bw - 1, i1 + 2), math.min(bh - 1, j1 + 2)
-	local w, h = i1 - i0 + 1, j1 - j0 + 1
-	-- extract (premultiplied) into a float grid of the box (scratch buffers kept, grown as needed)
-	local cells = w * h
-	if self._cap == nil or self._cap < cells then
-		self._cap = cells
-		self._grid = buffer.create(cells * 16)
-		self._tmp = buffer.create(cells * 16)
+	-- what is drawn (R): the box, 2 blocks of blur either side, inside the image and the window;
+	-- worked out over K, R and the blur's reach (2 blocks) inside the image. (Clamped at K's edges
+	-- as the box was at its own: at the image's edge the same, elsewhere R's blur stays inside K.)
+	local win = self._win
+	local ri0, rj0 = math.max(0, i0 - 2, win[1]), math.max(0, j0 - 2, win[2])
+	local ri1, rj1 = math.min(bw - 1, i1 + 2, win[3]), math.min(bh - 1, j1 + 2, win[4])
+	if ri1 < ri0 or rj1 < rj0 then
+		-- (none of it where the view is or can go before the next draw)
+		self:_clear_box()
+		self:_show(false)
+		return
+	end
+	local ki0, kj0 = math.max(0, ri0 - 2), math.max(0, rj0 - 2)
+	local kw, kh = math.min(bw - 1, ri1 + 2) - ki0 + 1, math.min(bh - 1, rj1 + 2) - kj0 + 1
+	local w, h = ri1 - ri0 + 1, rj1 - rj0 + 1
+	-- extract (premultiplied) into a float grid of K (scratch buffers kept, grown as needed)
+	local kcells, cells = kw * kh, w * h
+	if self._cap == nil or self._cap < kcells then
+		self._cap = kcells
+		self._grid = buffer.create(kcells * 16)
+		self._tmp = buffer.create(kcells * 16)
 	end
 	if self._out_cells ~= cells then
 		self._out_cells = cells
@@ -444,76 +568,146 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 	end
 	local grid, tmp = self._grid, self._tmp
 	local out = self._out :: buffer
-	buffer.fill(grid, 0, 0, cells * 16)
+	buffer.fill(grid, 0, 0, kcells * 16)
+	buffer.fill(tmp, 0, 0, kcells * 16)
 	buffer.fill(out, 0, 0, cells * 4)
+	-- each row's first and last column with glow (1-based by row)
+	local rlo, rhi = self._rlo, self._rhi
+	for y = 1, kh do
+		rlo[y], rhi[y] = kw, -1
+	end
+	local h1s, h2s = self._h1, self._h2
+	local ki1, kj1 = ki0 + kw - 1, kj0 + kh - 1
 	local writef32, readf32, writeu8 = buffer.writef32, buffer.readf32, buffer.writeu8
 	for _, b in live do
 		local i, j = b % bw, b // bw
-		local heat = 1 - (rt - self._hot[b]) * decay
+		if i < ki0 or i > ki1 or j < kj0 or j > kj1 then
+			continue
+		end
+		local heat = 1 - (rt - hot[b]) * decay
 		local tile = (j * S + S // 2) * W + i * S + S // 2
 		local owned = own ~= nil and readi32(own, tile * 4) > 0
-		local r, g, bb, a = extract(i * S + half + 0.5, j * S + half + 0.5, heat, rt, self._noise[b], owned)
-		local o = ((j - j0) * w + (i - i0)) * 16
+		local h1, h2 = h1s[b], h2s[b]
+		if h1 == nil then
+			h1, h2 = hashes(i * S + half + 0.5, j * S + half + 0.5)
+			h1s[b], h2s[b] = h1, h2
+		end
+		local r, g, bb, a = extract(heat, rt, noise[b], owned, h1, h2)
+		local x, y = i - ki0, j - kj0 + 1
+		local o = ((y - 1) * kw + x) * 16
 		writef32(grid, o, r)
 		writef32(grid, o + 4, g)
 		writef32(grid, o + 8, bb)
 		writef32(grid, o + 12, a)
-	end
-	-- blur across, then down (clamped at the box's edges, where it is zero anyway)
-	local wt = G.BLUR
-	local w0, w1, w2 = wt[1], wt[2], wt[3]
-	for y = 0, h - 1 do
-		local row = y * w
-		for x = 0, w - 1 do
-			local xa1, xb1 = math.min(w - 1, x + 1), math.max(0, x - 1)
-			local xa2, xb2 = math.min(w - 1, x + 2), math.max(0, x - 2)
-			for c = 0, 12, 4 do
-				local acc = readf32(grid, (row + x) * 16 + c) * w0
-					+ (readf32(grid, (row + xa1) * 16 + c) + readf32(grid, (row + xb1) * 16 + c)) * w1
-					+ (readf32(grid, (row + xa2) * 16 + c) + readf32(grid, (row + xb2) * 16 + c)) * w2
-				writef32(tmp, (row + x) * 16 + c, acc)
-			end
+		if x < rlo[y] then
+			rlo[y] = x
+		end
+		if x > rhi[y] then
+			rhi[y] = x
 		end
 	end
-	for y = 0, h - 1 do
-		local ya1, yb1 = math.min(h - 1, y + 1) * w, math.max(0, y - 1) * w
-		local ya2, yb2 = math.min(h - 1, y + 2) * w, math.max(0, y - 2) * w
-		local row = y * w
-		for x = 0, w - 1 do
-			-- (alpha first: a pixel with none is left clear)
-			local a = vblur(tmp, row + x, ya1 + x, yb1 + x, ya2 + x, yb2 + x, 12)
+	-- blur across, then down, over R's columns that a glowing block reaches (the rest stays zero).
+	-- Each pass slides a window of the 5 cells it weighs along its row / column: one read per cell
+	-- and channel, not five (the same sums in the same order).
+	local wt = G.BLUR
+	local w0, w1, w2 = wt[1], wt[2], wt[3]
+	local cov = G.COVERAGE
+	local xr0, xr1, yr0 = ri0 - ki0, ri1 - ki0, rj0 - kj0
+	-- per column of K: the first and last row blurred across (1-based by column; -1: none)
+	local cf, cl = self._cf, self._cl
+	for x = xr0 + 1, xr1 + 1 do
+		cf[x], cl[x] = -1, -1
+	end
+	for y = 0, kh - 1 do
+		local lo, hi = rlo[y + 1], rhi[y + 1]
+		if hi < 0 then
+			continue
+		end
+		local xa, xb = math.max(xr0, lo - 2), math.min(xr1, hi + 2)
+		if xb < xa then
+			continue
+		end
+		local row = y * kw
+		local q = (row + math.max(0, xa - 2)) * 16
+		local rm2, gm2, bm2, am2 = readf32(grid, q), readf32(grid, q + 4), readf32(grid, q + 8), readf32(grid, q + 12)
+		q = (row + math.max(0, xa - 1)) * 16
+		local rm1, gm1, bm1, am1 = readf32(grid, q), readf32(grid, q + 4), readf32(grid, q + 8), readf32(grid, q + 12)
+		q = (row + xa) * 16
+		local r0, g0, b0, a0 = readf32(grid, q), readf32(grid, q + 4), readf32(grid, q + 8), readf32(grid, q + 12)
+		q = (row + math.min(kw - 1, xa + 1)) * 16
+		local rp1, gp1, bp1, ap1 = readf32(grid, q), readf32(grid, q + 4), readf32(grid, q + 8), readf32(grid, q + 12)
+		q = (row + math.min(kw - 1, xa + 2)) * 16
+		local rp2, gp2, bp2, ap2 = readf32(grid, q), readf32(grid, q + 4), readf32(grid, q + 8), readf32(grid, q + 12)
+		for x = xa, xb do
+			local p = (row + x) * 16
+			writef32(tmp, p, r0 * w0 + (rp1 + rm1) * w1 + (rp2 + rm2) * w2)
+			writef32(tmp, p + 4, g0 * w0 + (gp1 + gm1) * w1 + (gp2 + gm2) * w2)
+			writef32(tmp, p + 8, b0 * w0 + (bp1 + bm1) * w1 + (bp2 + bm2) * w2)
+			writef32(tmp, p + 12, a0 * w0 + (ap1 + am1) * w1 + (ap2 + am2) * w2)
+			if cl[x + 1] < 0 then
+				cf[x + 1] = y
+			end
+			cl[x + 1] = y
+			q = (row + math.min(kw - 1, x + 3)) * 16
+			rm2, rm1, r0, rp1, rp2 = rm1, r0, rp1, rp2, readf32(grid, q)
+			gm2, gm1, g0, gp1, gp2 = gm1, g0, gp1, gp2, readf32(grid, q + 4)
+			bm2, bm1, b0, bp1, bp2 = bm1, b0, bp1, bp2, readf32(grid, q + 8)
+			am2, am1, a0, ap1, ap2 = am1, a0, ap1, ap2, readf32(grid, q + 12)
+		end
+	end
+	local yr1 = yr0 + h - 1
+	for x = xr0, xr1 do
+		local last = cl[x + 1]
+		if last < 0 then
+			continue
+		end
+		-- R's rows the blur down reaches in this column
+		local ya, yb = math.max(yr0, cf[x + 1] - 2), math.min(yr1, last + 2)
+		if yb < ya then
+			continue
+		end
+		local q = (math.max(0, ya - 2) * kw + x) * 16
+		local rm2, gm2, bm2, am2 = readf32(tmp, q), readf32(tmp, q + 4), readf32(tmp, q + 8), readf32(tmp, q + 12)
+		q = (math.max(0, ya - 1) * kw + x) * 16
+		local rm1, gm1, bm1, am1 = readf32(tmp, q), readf32(tmp, q + 4), readf32(tmp, q + 8), readf32(tmp, q + 12)
+		q = (ya * kw + x) * 16
+		local r0, g0, b0, a0 = readf32(tmp, q), readf32(tmp, q + 4), readf32(tmp, q + 8), readf32(tmp, q + 12)
+		q = (math.min(kh - 1, ya + 1) * kw + x) * 16
+		local rp1, gp1, bp1, ap1 = readf32(tmp, q), readf32(tmp, q + 4), readf32(tmp, q + 8), readf32(tmp, q + 12)
+		q = (math.min(kh - 1, ya + 2) * kw + x) * 16
+		local rp2, gp2, bp2, ap2 = readf32(tmp, q), readf32(tmp, q + 4), readf32(tmp, q + 8), readf32(tmp, q + 12)
+		for yk = ya, yb do
+			-- (alpha first: a pixel with none is left clear; each channel times COVERAGE, at most 1)
+			local a = math.min(1, (a0 * w0 + (ap1 + am1) * w1 + (ap2 + am2) * w2) * cov)
 			if a > 0.002 then
 				-- premultiplied to straight alpha for the GUI
-				local o = (row + x) * 4
-				writeu8(
-					out,
-					o,
-					math.min(255, floor(vblur(tmp, row + x, ya1 + x, yb1 + x, ya2 + x, yb2 + x, 0) / a * 255 + 0.5))
-				)
-				writeu8(
-					out,
-					o + 1,
-					math.min(255, floor(vblur(tmp, row + x, ya1 + x, yb1 + x, ya2 + x, yb2 + x, 4) / a * 255 + 0.5))
-				)
-				writeu8(
-					out,
-					o + 2,
-					math.min(255, floor(vblur(tmp, row + x, ya1 + x, yb1 + x, ya2 + x, yb2 + x, 8) / a * 255 + 0.5))
-				)
+				local o = ((yk - yr0) * w + x - xr0) * 4
+				local r = math.min(1, (r0 * w0 + (rp1 + rm1) * w1 + (rp2 + rm2) * w2) * cov)
+				local g = math.min(1, (g0 * w0 + (gp1 + gm1) * w1 + (gp2 + gm2) * w2) * cov)
+				local bb = math.min(1, (b0 * w0 + (bp1 + bm1) * w1 + (bp2 + bm2) * w2) * cov)
+				writeu8(out, o, math.min(255, floor(r / a * 255 + 0.5)))
+				writeu8(out, o + 1, math.min(255, floor(g / a * 255 + 0.5)))
+				writeu8(out, o + 2, math.min(255, floor(bb / a * 255 + 0.5)))
 				writeu8(out, o + 3, floor(a * 255 + 0.5))
 			end
+			q = (math.min(kh - 1, yk + 3) * kw + x) * 16
+			rm2, rm1, r0, rp1, rp2 = rm1, r0, rp1, rp2, readf32(tmp, q)
+			gm2, gm1, g0, gp1, gp2 = gm1, g0, gp1, gp2, readf32(tmp, q + 4)
+			bm2, bm1, b0, bp1, bp2 = bm1, b0, bp1, bp2, readf32(tmp, q + 8)
+			am2, am1, a0, ap1, ap2 = am1, a0, ap1, ap2, readf32(tmp, q + 12)
 		end
 	end
 	-- the last box where this one does not reach is cleared first
 	local box = self._box
-	if box ~= nil and (box[1] < i0 or box[2] < j0 or box[3] > i1 or box[4] > j1) then
+	if box ~= nil and (box[1] < ri0 or box[2] < rj0 or box[3] > ri1 or box[4] > rj1) then
 		self:_clear_box()
 	end
 	local img = self._img :: EditableImage
-	img:WritePixelsBuffer(Vector2.new(i0, j0), Vector2.new(w, h), out)
+	img:WritePixelsBuffer(Vector2.new(ri0, rj0), Vector2.new(w, h), out)
 	local nb = self._box_buf
-	nb[1], nb[2], nb[3], nb[4] = i0, j0, i1, j1
+	nb[1], nb[2], nb[3], nb[4] = ri0, rj0, ri1, rj1
 	self._box = nb
+	self:_show(true)
 end
 
 return FalloutGlow
