@@ -391,6 +391,8 @@ function Tutorial._process(self, delta: number)
 	local point = Vector2.new(-1, -1)
 	--- (a control's radius, when the mark is for one: it goes around it)
 	local around: number? = nil
+	--- (what the mark says, when not the step's own word)
+	local word: string? = nil
 	local id = step.id
 	if id == "spawn" then
 		if o ~= nil and o.spawned then
@@ -432,6 +434,7 @@ function Tutorial._process(self, delta: number)
 				self._base = o.tiles
 				self._goal = Data.grow_goal(o.tiles)
 				self._taps = 0
+				self._ready = nil
 			elseif id == "attack" then
 				self._neighbour = nil
 			elseif id == "ratio" then
@@ -446,9 +449,6 @@ function Tutorial._process(self, delta: number)
 				end
 			end
 			self:_say(i, if self._neighbour ~= nil then s:owner_name(self._neighbour) else nil)
-			if id == "grow" then
-				self._text:set_text(Data.grow_line(Data.GROW_TAPS, ctx.touch))
-			end
 		end
 		if id == "expand" then
 			if any then
@@ -457,9 +457,15 @@ function Tutorial._process(self, delta: number)
 			end
 			point = ui.advisor:frontier_point()
 		elseif id == "grow" then
-			if any then
+			-- expand, let the troops refill, expand again: an order counts when the army was ready
+			-- (Data.GROW_READY) as it went
+			if any and self._ready then
 				self._taps += 1
-				self._text:set_text(Data.grow_line(Data.GROW_TAPS - self._taps, ctx.touch))
+			end
+			local ready = (o.max_troops or 0) <= 0 or o.troops >= Data.GROW_READY * o.max_troops
+			if ready ~= self._ready then
+				self._ready = ready
+				self._text:set_text(if ready then (if ctx.touch then step.touch else step.desktop) else step.wait)
 			end
 			local land = math.clamp((o.tiles - self._base) / math.max(self._goal - self._base, 1), 0, 1)
 			local taps = math.min(self._taps / Data.GROW_TAPS, 1)
@@ -468,7 +474,16 @@ function Tutorial._process(self, delta: number)
 				self:_advance()
 				return
 			end
-			if self._taps == 0 or self._idle > Data.NUDGE_S then
+			if not ready then
+				-- the troop count, filling
+				local tc = self:_troops_control()
+				if tc ~= nil then
+					local r = tc:get_global_rect()
+					point = UICtx.rect_center(r)
+					around = math.max(r.Width, r.Height) * 0.5
+					word = "Refilling"
+				end
+			elseif self._taps == 0 or self._idle > Data.NUDGE_S then
 				point = ui.advisor:frontier_point()
 			end
 		elseif id == "ratio" then
@@ -557,7 +572,21 @@ function Tutorial._process(self, delta: number)
 			return
 		end
 	end
-	self:_draw_mark(point, step.mark, around)
+	self:_draw_mark(point, word or step.mark, around)
+end
+
+--- The command bar's troop count as it shows (phones' compact bar has its own), or nil.
+function Tutorial._troops_control(self): any
+	local bar = self.ui.bar
+	if bar == nil then
+		return nil
+	end
+	for _, c in { bar._troops_box, bar._m_troops } do
+		if c ~= nil and c:is_visible_in_tree() then
+			return c
+		end
+	end
+	return nil
 end
 
 --- The tap mark at logical point `p` ((-1, -1): none); `word`: what it says instead of "Tap here".

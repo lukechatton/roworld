@@ -90,12 +90,17 @@ do
 	expect(#sent == 3 and held == 2, "an order the floor leaves alone says nothing")
 end
 
--- the tutorial's floor waits until after "grow", whose card counts the taps down (2026-10-27)
+-- the tutorial's floor waits until after "grow" (2026-10-27)
 expect((Tutorial.step_index(Tutorial.FLOOR_FROM) or 0) > (Tutorial.step_index("grow") or math.huge), "no floor before the first neighbour")
-expect(Tutorial.grow_line(3, true) == "Tap empty land 3 more times", "grow: the taps to go")
-expect(Tutorial.grow_line(1, false) == "Click empty land 1 more time", "grow: the last one")
-expect(Tutorial.grow_line(0, true) == Tutorial.STEPS[Tutorial.step_index("grow")].touch, "grow: then the step's own line")
-expect(#Tutorial.grow_line(Tutorial.GROW_TAPS, true) <= 40, "grow's countdown fits a phone's card")
+do
+	-- grow teaches expand, let the troops refill, expand again: never "keep tapping"
+	local g = Tutorial.STEPS[Tutorial.step_index("grow")]
+	for _, line in { g.touch, g.desktop, g.wait } do
+		expect(not string.find(string.lower(line), "keep"), "grow never says keep tapping: " .. line)
+	end
+	expect(type(g.wait) == "string" and #g.wait <= 40, "grow's wait line fits a phone's card")
+	expect(Tutorial.GROW_READY > 0.15 and Tutorial.GROW_READY < 0.5, "an expansion counts with the army part refilled")
+end
 
 -- a new player's floor after the tutorial: their first ROOKIE_MATCHES matches (2026-10-27)
 expect(Tutorial.rookie(0) and Tutorial.rookie(Tutorial.ROOKIE_MATCHES - 1), "the first matches are a new player's")
