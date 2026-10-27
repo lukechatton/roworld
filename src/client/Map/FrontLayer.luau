@@ -10,6 +10,8 @@
 -- The front: the label belongs on the attack's frontier, the whole shared border; the
 -- client has no frontier, so it uses the local player's border tiles (UI BorderTracker, handed
 -- over with set_borders) that touch the other owner.
+-- (2026-10-26, phones' slow frames: a poll works in tables kept from one poll to the next, and a label
+-- is written only what changed.)
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Core = Airfront:WaitForChild("Core")
@@ -34,6 +36,10 @@ FrontLayer.Z = 24
 
 type Slot = { cx: number, cy: number, sx: number, sy: number, dx: number, dy: number, t0: number }
 type Entry = { text: string, incoming: boolean, slots: { Slot }, seen: boolean }
+--- A label and what it was last given (Roblox's own values, kept here).
+type Label = { label: TextLabel, vis: boolean, text: string?, incoming: boolean?, x: number, y: number }
+--- An attack worth a label, this poll.
+type Todo = { aid: number, other: number, incoming: boolean, troops: number }
 
 function FrontLayer.new(parent: Instance, view: any)
 	local self = setmetatable({}, FrontLayer) :: any
@@ -49,8 +55,13 @@ function FrontLayer.new(parent: Instance, view: any)
 	self._borders = nil :: any
 	--- aid -> label entry
 	self._entries = {} :: { [number]: Entry }
-	self._labels = {} :: { TextLabel }
+	self._labels = {} :: { Label }
 	self._poll = 0.0
+	--- (a poll's working tables: the owners wanted, the attacks (records reused), owner -> front
+	--- tiles (an empty list: none))
+	self._wanted = {} :: { [number]: boolean }
+	self._todo = {} :: { Todo }
+	self._fronts = {} :: { [number]: { number } }
 	return self
 end
 
@@ -64,7 +75,8 @@ function FrontLayer.unbind(self: any)
 	self._state = nil
 	table.clear(self._entries)
 	for _, l in self._labels do
-		l.Visible = false
+		l.vis = false
+		l.label.Visible = false
 	end
 end
 
@@ -78,9 +90,17 @@ function FrontLayer.set_borders(self: any, tracker: any)
 	self._borders = tracker
 end
 
---- Border tiles of the local player touching each owner in `wanted`: owner -> { tile }.
-local function fronts_by_owner(st: any, border: { [number]: boolean }, wanted: { [number]: boolean }): { [number]: { number } }
-	local out = {}
+--- Border tiles of the local player touching each owner in `wanted`, into `out`: owner -> { tile }
+--- (its lists emptied first and kept; an owner with none has an empty list or none).
+local function fronts_by_owner(
+	st: any,
+	border: { [number]: boolean },
+	wanted: { [number]: boolean },
+	out: { [number]: { number } }
+)
+	for _, list in out do
+		table.clear(list)
+	end
 	local W = st.map.W or Defs.W
 	local N = st.map.N or (W * (st.map.H or Defs.H))
 	for t in border do
@@ -120,23 +140,38 @@ local function fronts_by_owner(st: any, border: { [number]: boolean }, wanted: {
 			table.insert(list, t)
 		end
 	end
-	return out
 end
 
---- Representative tiles of the largest connected clusters of `tiles`.
+-- clusters()'s working tables, kept (it runs for each front every POLL_S): the tiles, those reached,
+-- one cluster's queue, the clusters found (records reused from c_pool) and the result
+local c_set: { [number]: boolean } = {}
+local c_seen: { [number]: boolean } = {}
+local c_queue: { number } = {}
+local c_found: { { tile: number, size: number } } = {}
+local c_pool: { { tile: number, size: number } } = {}
+local c_out: { number } = {}
+
+local function by_size(a: { tile: number, size: number }, b: { tile: number, size: number }): boolean
+	return a.size > b.size
+end
+
+--- Representative tiles of the largest connected clusters of `tiles` (the list is reused by the
+--- next call).
 local function clusters(tiles: { number }, W: number, min_size: number, max_n: number): { number }
-	local set = {}
+	local set, seen, queue, found = c_set, c_seen, c_queue, c_found
+	table.clear(set)
+	table.clear(seen)
+	table.clear(found)
 	for _, t in tiles do
 		set[t] = true
 	end
-	local found = {}
-	local seen = {}
 	for _, start in tiles do
 		if seen[start] then
 			continue
 		end
 		seen[start] = true
-		local queue = { start }
+		table.clear(queue)
+		queue[1] = start
 		local qi = 1
 		local sx, sy = 0, 0
 		while qi <= #queue do
@@ -173,12 +208,18 @@ local function clusters(tiles: { number }, W: number, min_size: number, max_n: n
 				best = t
 			end
 		end
-		table.insert(found, { tile = best, size = count })
+		local nf = #found + 1
+		local rec = c_pool[nf]
+		if rec == nil then
+			rec = { tile = 0, size = 0 }
+			c_pool[nf] = rec
+		end
+		rec.tile, rec.size = best, count
+		found[nf] = rec
 	end
-	table.sort(found, function(a, b)
-		return a.size > b.size
-	end)
-	local out = {}
+	table.sort(found, by_size)
+	local out = c_out
+	table.clear(out)
 	for i, c in found do
 		if #out >= max_n then
 			break
@@ -188,6 +229,11 @@ local function clusters(tiles: { number }, W: number, min_size: number, max_n: n
 		end
 	end
 	return out
+end
+
+--- A slot's distance to tile `t`'s centre (map units, Manhattan).
+local function slot_dist(s: Slot, t: number, W: number): number
+	return math.abs(s.dx - (t % W + 0.5)) + math.abs(s.dy - (t // W + 0.5))
 end
 
 function FrontLayer._poll_fronts(self: any, now: number)
@@ -202,8 +248,10 @@ function FrontLayer._poll_fronts(self: any, now: number)
 		return
 	end
 	-- attacks worth a label (outgoing on players, incoming from non-tribe players)
-	local wanted = {}
-	local todo = {}
+	local wanted = self._wanted
+	table.clear(wanted)
+	local todo = self._todo
+	local todo_n = 0
 	for aid, a in st.attacks do
 		local other = 0
 		local incoming = false
@@ -218,17 +266,25 @@ function FrontLayer._poll_fronts(self: any, now: number)
 		end
 		if other ~= 0 then
 			wanted[other] = true
-			table.insert(todo, { aid = aid, other = other, incoming = incoming, troops = a.troops })
+			todo_n += 1
+			local rec = todo[todo_n]
+			if rec == nil then
+				rec = {} :: any
+				todo[todo_n] = rec
+			end
+			rec.aid, rec.other, rec.incoming, rec.troops = aid, other, incoming, a.troops
 		end
 	end
-	if #todo > 0 then
+	if todo_n > 0 then
 		local k = tonumber(st.map.k_lin) or Rules.K_LIN
 		local W = st.map.W or Defs.W
-		local fronts = fronts_by_owner(st, tracker.border, wanted)
+		local fronts = self._fronts
+		fronts_by_owner(st, tracker.border, wanted, fronts)
 		local snap = FrontLayer.SNAP_FULL / k
-		for _, a in todo do
+		for ti = 1, todo_n do
+			local a = todo[ti]
 			local tiles = fronts[a.other]
-			if tiles == nil then
+			if tiles == nil or #tiles == 0 then
 				continue
 			end
 			local reps = clusters(tiles, W, FrontLayer.MIN_CLUSTER_FULL / k, FrontLayer.MAX_CLUSTERS)
@@ -243,10 +299,11 @@ function FrontLayer._poll_fronts(self: any, now: number)
 			local slots = e.slots
 			-- keep two labels on their own clusters (swapped when that is shorter)
 			if #reps == 2 and #slots == 2 then
-				local function d(s: Slot, t: number): number
-					return math.abs(s.dx - (t % W + 0.5)) + math.abs(s.dy - (t // W + 0.5))
-				end
-				if d(slots[1], reps[2]) + d(slots[2], reps[1]) < d(slots[1], reps[1]) + d(slots[2], reps[2]) then
+				local s1, s2 = slots[1], slots[2]
+				if
+					slot_dist(s1, reps[2], W) + slot_dist(s2, reps[1], W)
+					< slot_dist(s1, reps[1], W) + slot_dist(s2, reps[2], W)
+				then
 					reps[1], reps[2] = reps[2], reps[1]
 				end
 			end
@@ -277,12 +334,12 @@ function FrontLayer._poll_fronts(self: any, now: number)
 	end
 end
 
-local function label(self: any, n: number): TextLabel
-	local l = self._labels[n]
-	if l ~= nil then
-		return l
+local function label(self: any, n: number): Label
+	local rec = self._labels[n]
+	if rec ~= nil then
+		return rec
 	end
-	l = Instance.new("TextLabel")
+	local l = Instance.new("TextLabel")
 	l.Name = "FrontTroops"
 	l.BackgroundTransparency = 1
 	l.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -297,8 +354,9 @@ local function label(self: any, n: number): TextLabel
 	s.Thickness = 1.5
 	s.LineJoinMode = Enum.LineJoinMode.Round
 	s.Parent = l
-	self._labels[n] = l
-	return l
+	rec = { label = l, vis = true, text = nil, incoming = nil, x = math.huge, y = math.huge }
+	self._labels[n] = rec
+	return rec :: Label
 end
 
 function FrontLayer.tick(self: any, dt: number)
@@ -320,17 +378,32 @@ function FrontLayer.tick(self: any, dt: number)
 				continue
 			end
 			n += 1
-			local l = label(self, n)
-			l.Visible = true
-			l.Text = e.text
-			l.TextColor3 = if e.incoming then FrontLayer.INCOMING else FrontLayer.OUTGOING
-			l.Position = UDim2.fromOffset(x, y)
+			local rec = label(self, n)
+			local l = rec.label
+			-- (each written only when it changed: the text is measured again on every write)
+			if not rec.vis then
+				rec.vis = true
+				l.Visible = true
+			end
+			if rec.text ~= e.text then
+				rec.text = e.text
+				l.Text = e.text
+			end
+			if rec.incoming ~= e.incoming then
+				rec.incoming = e.incoming
+				l.TextColor3 = if e.incoming then FrontLayer.INCOMING else FrontLayer.OUTGOING
+			end
+			if rec.x ~= x or rec.y ~= y then
+				rec.x, rec.y = x, y
+				l.Position = UDim2.fromOffset(x, y)
+			end
 		end
 	end
 	for j = n + 1, #self._labels do
-		local l = self._labels[j]
-		if l.Visible then
-			l.Visible = false
+		local rec = self._labels[j]
+		if rec.vis then
+			rec.vis = false
+			rec.label.Visible = false
 		end
 	end
 end

@@ -10,8 +10,16 @@ local GlassPanel = require("./GlassPanel")
 local UICtx = require("./UICtx")
 
 local Coach = W.class(W.Control)
+local Tut = UICtx.data("Tutorial")
+local FLOOR_TIP = string.format(
+	"Keep %d%% of your army at home, or neighbours walk right in. In your first %d matches, attacks hold that much back.",
+	math.floor(Tut.ROOKIE_FLOOR * 100 + 0.5),
+	Tut.ROOKIE_MATCHES
+)
 
+--- `again`: shown each time it is offered, not once per player (UIAdvisor paces it).
 Coach.TIPS = {
+	floor = { icon = "troops", again = true, desktop = FLOOR_TIP, touch = FLOOR_TIP },
 	expand = {
 		icon = "attack",
 		desktop = "Click neutral land next to you to expand. Space does the same under the cursor.",
@@ -53,7 +61,7 @@ Coach.TIPS = {
 		touch = "You are under attack! Track every front in the Attacks panel. Defense Posts make borders much harder to take.",
 	},
 }
-Coach.PRIORITY = { "attacked", "select", "expand", "contact", "tray", "ratio", "city", "boat" }
+Coach.PRIORITY = { "attacked", "floor", "select", "expand", "contact", "tray", "ratio", "city", "boat" }
 Coach.LIFETIME = 16.0
 --- Keep-out rects (the YOU label) cost this many times their overlap area, with this margin (px).
 Coach.KEEPOUT_WEIGHT = 12.0
@@ -185,7 +193,8 @@ end
 --- Queue a tip. `target` returns the screen point to point at (Vector2(-1, -1) = no arrow).
 function Coach.offer(self, id: string, target: (() -> Vector2)?, arg: string?)
 	-- (the tutorial's steps are the tips while it runs: UI/Tutorial)
-	if self.muted or self:seen(id) or id == self.current or Coach.TIPS[id] == nil then
+	local tip = Coach.TIPS[id]
+	if self.muted or tip == nil or id == self.current or (not tip.again and self:seen(id)) then
 		return
 	end
 	for _, q in ipairs(self._queue) do
@@ -249,20 +258,22 @@ function Coach._next(self)
 	local ctx = self.ctx
 	local q = table.remove(self._queue, 1)
 	local id = q.id
-	if self:seen(id) then
+	local tip = Coach.TIPS[id]
+	if not tip.again and self:seen(id) then
 		self:_next()
 		return
 	end
 	self.current = id
 	self._target = q.target
-	local tip = Coach.TIPS[id]
 	local txt = if ctx.touch then tip.touch else tip.desktop
 	if string.find(txt, "%s", 1, true) then
 		txt = string.format(txt, q.arg)
 	end
 	self._text:set_text(txt)
 	self._icon:set_icon(tip.icon)
-	self:_mark_seen(id)
+	if not tip.again then
+		self:_mark_seen(id)
+	end
 	self._age = 0.0
 	local c = ctx.compact
 	self._card:set_min_size(Vector2.new(if c then 0 else 320, 0))

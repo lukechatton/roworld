@@ -7,6 +7,7 @@ Each is a 512 px square in its own colour with a big glyph and a label:
   crate        blue, the chest            CRATE
   crate_first  green, the chest + a star  FIRST CRATE
   crate3       violet, three chests       3 CRATES
+  crate10      amber, three chests + 10   10 CRATES
 
 --upload sets them on the products (Open Cloud developer-products v2 PATCH, multipart imageFile; ids
 from src/shared/Data/Products.luau; one not created yet, id 0, is skipped). The API key is read from
@@ -40,11 +41,18 @@ ICONS = {
     "crate": {"top": (70, 132, 255), "bottom": (22, 38, 128), "label": "CRATE", "glyph": "chest"},
     "crate_first": {"top": (56, 196, 110), "bottom": (10, 92, 52), "label": "FIRST CRATE", "glyph": "chest_star"},
     "crate3": {"top": (164, 104, 255), "bottom": (58, 22, 132), "label": "3 CRATES", "glyph": "chest3"},
+    "crate10": {"top": (255, 178, 52), "bottom": (150, 64, 6), "label": "10 CRATES", "glyph": "chest3",
+                "tint": (255, 226, 160), "badge": "10"},
+    # RoWorld General (Data/Subscription): the subscription's picture (Creator Dashboard, 150 px; not a
+    # developer product: --general writes build/products/general_150.png to upload there)
+    "general": {"top": (44, 60, 104), "bottom": (12, 18, 40), "label": "GENERAL", "glyph": "insignia"},
 }
 # --create: the product's name and description (as the crates' on production)
 NAMES = {
     "crate3": ("3 Cosmetic Crates", "Three crates, each a territory skin or a flag you don't own yet. Odds are shown in "
                "the game before you buy."),
+    "crate10": ("10 Cosmetic Crates", "Ten crates, each a territory skin or a flag you don't own yet. Odds are shown in "
+                "the game before you buy."),
 }
 
 
@@ -112,6 +120,20 @@ def star(px, fill):
     return im
 
 
+def star5(px, fill):
+    """A five-pointed star (a general's insignia)."""
+    import math
+    im = Image.new("RGBA", (px, px), (0, 0, 0, 0))
+    c = px / 2
+    pts = []
+    for i in range(10):
+        r = c * (0.98 if i % 2 == 0 else 0.40)
+        a = math.pi * 2 * i / 10 - math.pi / 2
+        pts.append((c + math.cos(a) * r, c * 1.06 + math.sin(a) * r))
+    ImageDraw.Draw(im).polygon(pts, fill=fill)
+    return im
+
+
 def render(key, spec):
     im = gradient(spec["top"], spec["bottom"])
     # a soft light behind the glyph
@@ -122,10 +144,15 @@ def render(key, spec):
     if g == "crown":
         glyph = crown(300)
         im.alpha_composite(shadowed(glyph), ((SIZE - 300) // 2, 30))
+    elif g == "insignia":
+        # one big gold star, a smaller one each side
+        gold = (232, 192, 88, 255)
+        for x, y, px in ((48, 150, 120), (SIZE - 48 - 120, 150, 120), ((SIZE - 280) // 2, 40, 280)):
+            im.alpha_composite(shadowed(star5(px, gold), offset=8, blur=8), (x, y))
     elif g == "chest3":
         # two behind (tinted with the ground), one in front with a cut-out edge so the three read apart
         back = chest(220)
-        tint = Image.new("RGBA", back.size, (206, 184, 255, 255))
+        tint = Image.new("RGBA", back.size, spec.get("tint", (206, 184, 255)) + (255,))
         tint.putalpha(back.getchannel("A"))
         im.alpha_composite(shadowed(tint), (34, 52))
         im.alpha_composite(shadowed(tint), (SIZE - 34 - 220, 52))
@@ -139,6 +166,12 @@ def render(key, spec):
         x0 = (SIZE - 280) // 2
         im.alpha_composite(ring, (x0 - pad, 96 - pad))
         im.alpha_composite(shadowed(front, offset=12, blur=12, alpha=150), (x0, 96))
+        if spec.get("badge"):
+            st = star(170, (255, 255, 255, 255))
+            d = ImageDraw.Draw(st)
+            f = ImageFont.truetype(FONT, 64)
+            d.text((85, 88), spec["badge"], font=f, fill=spec["bottom"] + (255,), anchor="mm")
+            im.alpha_composite(shadowed(st.rotate(-12, resample=Image.BICUBIC), offset=6, blur=6), (322, 12))
     else:
         glyph = chest(300)
         im.alpha_composite(shadowed(glyph), ((SIZE - 300) // 2, 40))
@@ -249,6 +282,8 @@ def main():
     ap.add_argument("--write", choices=["prod", "staging"], default="")
     args = ap.parse_args()
     paths = {k: render(k, s) for k, s in ICONS.items()}
+    small = Image.open(paths["general"]).resize((150, 150), Image.LANCZOS)
+    small.save(os.path.join(OUT, "general_150.png"), optimize=True)
     for k, p in paths.items():
         print(k, "->", os.path.relpath(p, ROOT))
     if args.create:

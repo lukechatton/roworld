@@ -21,6 +21,7 @@
 --   Purchases.has_unlock(player, key) / Purchases.unlock_mask(player)   what the player has unlocked
 --   Purchases.starter_state(player) -> false | { state = "ready" } | { state = "active", left = s }
 --   Purchases.starter_seen(player)   the starter pack is on their screen: its clock starts (once; yields)
+--   Purchases.general_perks(player, day, skin, crates) -> given?   a RoWorld General's day (yields)
 -- The Arsenal (Data/Arsenal): a product whose `grants` is "unlock:<key>" is not a credit — its receipt
 -- unlocks that item for good (and pays the item's bonus Stars once). The same unlock bought twice (the
 -- shop never offers it) pays Stars instead, DUPLICATE_STARS_PER_ROBUX for each Robux of its price.
@@ -57,6 +58,9 @@ local Starter: any = if IS_ROBLOX
 local Shop: any = if IS_ROBLOX
 	then require((game :: any):GetService("ReplicatedStorage"):WaitForChild("Airfront").Data.Shop)
 	else require("../shared/Data/Shop")
+local Subscription: any = if IS_ROBLOX
+	then require((game :: any):GetService("ReplicatedStorage"):WaitForChild("Airfront").Data.Subscription)
+	else require("../shared/Data/Subscription")
 
 local Purchases = {}
 
@@ -85,6 +89,8 @@ type Record = {
 	starter: { started: number, ends: number, used: boolean? }?,
 	--- exclusive items already given (and put on once): Cosmetics.granted
 	gifts: { [string]: boolean },
+	--- RoWorld General: the UTC day whose perks were given (Purchases.general_perks)
+	general_day: number?,
 }
 
 --- Reading a player's record when they join: GetAsync attempts and the waits between them. Roblox
@@ -156,6 +162,8 @@ local function clean(v: any, user_id: number?): Record
 	rec.stars = count(v.stars)
 	rec.stars_earned = count(v.stars_earned)
 	rec.tutorial_paid = if v.tutorial_paid == true then true else nil
+	local gday = tonumber(v.general_day)
+	rec.general_day = if gday ~= nil and gday == gday then math.floor(gday) else nil
 	if type(v.unlocks) == "table" then
 		for k, on in v.unlocks do
 			if on == true and Arsenal.item(k) ~= nil then
@@ -742,6 +750,55 @@ function Purchases.tutorial_bonus(player: any, amount: number): boolean
 		notify(player)
 	end
 	return paid
+end
+
+--- RoWorld General (Data/Subscription; 2026-10-27; server/General calls it while Roblox says the
+--- player is subscribed): UTC day `day`'s crate credit, or, where crates aren't allowed (`crates`
+--- false), Subscription.DAILY_STARS Stars, once a day; and the month's General skin `skin`, kept for
+--- good (put on when no skin is worn). Returns what it gave now ({ crate?, stars?, skin? }; {} when
+--- the day's were given already), or nil when the store failed (tried again later).
+function Purchases.general_perks(player: any, day: number, skin: string?, crates: boolean): any
+	local it = if skin ~= nil then Cosmetics.item(skin) else nil
+	local stored: Record? = nil
+	local given: any = {}
+	local ok, err = pcall(function()
+		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+			local rec = clean(old, player.UserId)
+			stored = rec
+			given = {}
+			local changed = false
+			if rec.general_day ~= day then
+				rec.general_day = day
+				if crates then
+					rec.credits.crate = math.min((rec.credits.crate or 0) + 1, Purchases.MAX_CREDITS)
+					given.crate = true
+				else
+					rec.stars = math.min(rec.stars + Subscription.DAILY_STARS, Purchases.MAX_STARS)
+					rec.stars_earned = math.min(rec.stars_earned + Subscription.DAILY_STARS, Purchases.MAX_STARS)
+					given.stars = Subscription.DAILY_STARS
+				end
+				changed = true
+			end
+			if it ~= nil and it.general and not rec.owned[it.id] then
+				rec.owned[it.id] = true
+				if rec.equipped[it.kind] == nil then
+					rec.equipped[it.kind] = it.id
+				end
+				given.skin = it.id
+				changed = true
+			end
+			return if changed then rec else nil
+		end)
+	end)
+	if not ok or stored == nil then
+		log("could not give " .. tostring(player.UserId) .. " their General's day: " .. tostring(err))
+		return nil
+	end
+	remember(player, stored :: Record)
+	if next(given) ~= nil then
+		notify(player)
+	end
+	return given
 end
 
 --- Rofront Staging's "Replay as new player": the tutorial's Stars can be earned again, the first

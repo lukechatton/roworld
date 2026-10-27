@@ -21,6 +21,9 @@
 -- label, five objects for each of a late game's 500 structures, all laid out again on every camera
 -- move (2026-10-08, docs/performance.md). The level label is made when a structure has a level to
 -- show. While shapes_one has not loaded, every plate keeps a second image for the fill.
+-- (2026-10-26, phones' slow frames: a plate and its bar remember what they were last given and are
+-- written only what changed, read nothing back from Roblox; a structure's own event redraws that
+-- structure alone, where every SAM shot on the map used to redraw every plate.)
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Rules = require(Airfront:WaitForChild("Core"):WaitForChild("Rules")) :: any
@@ -88,6 +91,20 @@ type Plate = {
 	owner: number,
 	state_key: number,
 	size: number,
+	--- what the glyph and the bar were last given (Roblox's own values, kept here: a plate taken
+	--- from the pool still shows them, so nothing needs resetting)
+	glyph_on: boolean,
+	bar_on: boolean,
+	bar_w: number,
+	bar_h: number,
+	bar_x: number,
+	bar_y: number,
+	bar_edge: number,
+	fill_w: number,
+	fill_h: number,
+	fill_c: number,
+	--- the full pass that last saw it on screen
+	pass: number,
 }
 
 local function value_scale(c: Color3, k: number): Color3
@@ -163,8 +180,11 @@ function StructureLayer.new(parent: Instance, view: any)
 	self._bar_root = bars
 	self._dirty = true
 	self._cam_version = -1
+	self._pass = 0
 	--- sids of on-screen plates being built or reloading (updated every frame between full passes)
-	self._anim = {} :: { number }
+	self._anim = {} :: { [number]: boolean }
+	--- sids a structure event named since the last frame (drawn again on their own)
+	self._touched = {} :: { [number]: boolean }
 	return self
 end
 
@@ -180,6 +200,8 @@ function StructureLayer.unbind(self: any)
 		self:_release(p)
 		self._plates[sid] = nil
 	end
+	table.clear(self._anim)
+	table.clear(self._touched)
 end
 
 function StructureLayer.destroy(self: any)
@@ -188,14 +210,23 @@ function StructureLayer.destroy(self: any)
 	self.root:Destroy()
 end
 
--- WorldView forwards GameState structure signals by these names.
-function StructureLayer.on_structure_added(self: any)
-	self._dirty = true
+-- WorldView forwards GameState structure signals by these names (sid first). Only that structure is
+-- drawn again: structure_leveled also comes with every SAM / silo shot (Ev.STRUCT_SHOTS, for its
+-- reload bar), and in a late game's missile exchange that redrew all 500 plates a frame.
+function StructureLayer.on_structure_added(self: any, sid: number?)
+	if type(sid) == "number" then
+		self._touched[sid] = true
+	else
+		self._dirty = true
+	end
 end
 StructureLayer.on_structure_changed = StructureLayer.on_structure_added
 StructureLayer.on_structure_removed = StructureLayer.on_structure_added
 StructureLayer.on_structure_leveled = StructureLayer.on_structure_added
-StructureLayer.mark_structures_dirty = StructureLayer.on_structure_added
+
+function StructureLayer.mark_structures_dirty(self: any)
+	self._dirty = true
+end
 
 local function image(parent: Instance, name: string, id: string, z: number): ImageLabel
 	local l = Instance.new("ImageLabel")
@@ -233,6 +264,17 @@ function StructureLayer._acquire(self: any): Plate
 		size = -1,
 		x = -1e9,
 		y = -1e9,
+		glyph_on = true,
+		bar_on = false,
+		bar_w = -1,
+		bar_h = -1,
+		bar_x = -1e9,
+		bar_y = -1e9,
+		bar_edge = -1,
+		fill_w = -1,
+		fill_h = -1,
+		fill_c = -1,
+		pass = -1,
 	}
 end
 
@@ -263,8 +305,9 @@ end
 
 function StructureLayer._release(self: any, p: Plate)
 	p.frame.Visible = false
-	if p.bar ~= nil then
+	if p.bar ~= nil and p.bar_on then
 		p.bar.Visible = false
+		p.bar_on = false
 	end
 	p.kind = -1
 	p.owner = -1
@@ -375,8 +418,9 @@ end
 function StructureLayer._bar(self: any, p: Plate, progress: number?, x: number, y: number, ppt: number)
 	local w = StructureLayer.BAR_W * ppt
 	if progress == nil or w < StructureLayer.BAR_MIN_PX then
-		if p.bar ~= nil and p.bar.Visible then
+		if p.bar ~= nil and p.bar_on then
 			p.bar.Visible = false
+			p.bar_on = false
 		end
 		return
 	end
@@ -401,27 +445,59 @@ function StructureLayer._bar(self: any, p: Plate, progress: number?, x: number, 
 	local h = math.max(3, math.round(StructureLayer.BAR_H * ppt))
 	local bw = math.max(1, math.round(StructureLayer.BAR_BORDER * ppt))
 	local wr = math.round(w)
-	b.Visible = true
-	b.Size = UDim2.fromOffset(wr, h)
-	b.Position = UDim2.fromOffset(math.round(x - wr / 2), math.round(y + StructureLayer.BAR_OFFSET_Y * ppt))
+	-- (each written only when it changed: a pan moves the bar, a reload grows its fill now and then)
+	if not p.bar_on then
+		p.bar_on = true
+		b.Visible = true
+	end
+	if p.bar_w ~= wr or p.bar_h ~= h then
+		p.bar_w, p.bar_h = wr, h
+		b.Size = UDim2.fromOffset(wr, h)
+	end
+	local bx, by = math.round(x - wr / 2), math.round(y + StructureLayer.BAR_OFFSET_Y * ppt)
+	if p.bar_x ~= bx or p.bar_y ~= by then
+		p.bar_x, p.bar_y = bx, by
+		b.Position = UDim2.fromOffset(bx, by)
+	end
 	local inner = math.max(0, wr - 2 * bw)
-	f.Position = UDim2.fromOffset(bw, bw)
-	f.Size = UDim2.fromOffset(math.round(progress * inner), math.max(1, h - 2 * bw))
+	if p.bar_edge ~= bw then
+		p.bar_edge = bw
+		f.Position = UDim2.fromOffset(bw, bw)
+	end
+	local fw, fh = math.round(progress * inner), math.max(1, h - 2 * bw)
+	if p.fill_w ~= fw or p.fill_h ~= fh then
+		p.fill_w, p.fill_h = fw, fh
+		f.Size = UDim2.fromOffset(fw, fh)
+	end
 	local th = StructureLayer.BAR_THRESHOLDS
-	local c = StructureLayer.BAR_COLORS
-	f.BackgroundColor3 = if progress < th[1] then c[1] elseif progress < th[2] then c[2] elseif progress < th[3] then c[3] else c[4]
+	local ci = if progress < th[1] then 1 elseif progress < th[2] then 2 elseif progress < th[3] then 3 else 4
+	if p.fill_c ~= ci then
+		p.fill_c = ci
+		f.BackgroundColor3 = StructureLayer.BAR_COLORS[ci]
+	end
 end
 
 --- One structure's plate at (x, y) (screen px), `size` px: style, size, position (written only when
---- they changed), its progress bar.
-function StructureLayer._place(self: any, p: Plate, s: any, rt: number, x: number, y: number, size: number, dots: boolean, ppt: number)
+--- they changed), its progress bar. Returns the progress (nil = no bar).
+function StructureLayer._place(
+	self: any,
+	p: Plate,
+	s: any,
+	rt: number,
+	x: number,
+	y: number,
+	size: number,
+	dots: boolean,
+	ppt: number
+): number?
 	self:_style(p, s, (s.active_tick or 0) > rt)
 	local px = math.round(size)
 	if p.size ~= px then
 		p.size = px
 		p.frame.Size = UDim2.fromOffset(px, px)
 	end
-	if p.glyph.Visible == dots then
+	if p.glyph_on == dots then
+		p.glyph_on = not dots
 		p.glyph.Visible = not dots
 	end
 	local rx, ry = math.round(x), math.round(y)
@@ -429,7 +505,42 @@ function StructureLayer._place(self: any, p: Plate, s: any, rt: number, x: numbe
 		p.x, p.y = rx, ry
 		p.frame.Position = UDim2.fromOffset(rx, ry)
 	end
-	self:_bar(p, StructureLayer.progress(s, rt), x, y, ppt)
+	local progress = StructureLayer.progress(s, rt)
+	self:_bar(p, progress, x, y, ppt)
+	return progress
+end
+
+--- One structure drawn on its own (between full passes, the camera still): placed when on screen,
+--- its plate let go when not or when it is gone. True while it is built or reloads.
+function StructureLayer._visit(
+	self: any,
+	st: any,
+	sid: number,
+	rt: number,
+	base: number,
+	dots: boolean,
+	ppt: number
+): boolean
+	local cam = self.view.rig
+	local s = st.structures[sid]
+	local p = self._plates[sid]
+	if s ~= nil then
+		local x, y = cam:tile_to_screen(s.tile)
+		local size = base * (SHAPE_SCALE[s.kind + 1] or 1.0)
+		if cam:on_screen(x, y, size) then
+			if p == nil then
+				p = self:_acquire()
+				self._plates[sid] = p
+			end
+			local progress = self:_place(p :: Plate, s, rt, x, y, size, dots, ppt)
+			return progress ~= nil or (s.active_tick or 0) > rt
+		end
+	end
+	if p ~= nil then
+		self:_release(p)
+		self._plates[sid] = nil
+	end
+	return false
 end
 
 function StructureLayer.tick(self: any, _dt: number)
@@ -437,8 +548,8 @@ function StructureLayer.tick(self: any, _dt: number)
 	if st == nil then
 		return
 	end
-	-- (a structure added, captured, removed, upgraded or starting to reload marks the layer dirty:
-	-- on_structure_* below, forwarded from GameState's signals)
+	-- (a structure added, captured, removed, upgraded or starting to reload is drawn again on its own
+	-- next frame: on_structure_* above, forwarded from GameState's signals)
 	local cam = self.view.rig
 	local rt = st.render_tick or st.tick or 0
 	local k = tonumber(st.map and st.map.k_lin) or Rules.K_LIN
@@ -460,62 +571,61 @@ function StructureLayer.tick(self: any, _dt: number)
 		self._one_seen = one_ready
 		self._dirty = true
 	end
+	local anim = self._anim
+	local touched = self._touched
 	if not self._dirty and cam.version == self._cam_version then
 		-- nothing moved: only the plates being built or reloading change (their bar, and their
 		-- style once finished) — late games always have some, and redrawing every plate each frame
-		-- cost the most there
-		local anim = self._anim
-		local keep = 0
-		for i = 1, #anim do
-			local sid = anim[i]
-			local s = st.structures[sid]
-			local p = self._plates[sid]
-			if s ~= nil and p ~= nil then
-				local x, y = cam:tile_to_screen(s.tile)
-				self:_place(p, s, rt, x, y, base * (SHAPE_SCALE[s.kind + 1] or 1.0), dots, ppt)
-				if StructureLayer.progress(s, rt) ~= nil or (s.active_tick or 0) > rt then
-					keep += 1
-					anim[keep] = sid
-				end
-			end
+		-- cost the most there — and those a structure event named (added, captured, removed,
+		-- upgraded, a missile fired)
+		for sid in touched do
+			anim[sid] = true
 		end
-		for i = #anim, keep + 1, -1 do
-			anim[i] = nil
+		table.clear(touched)
+		for sid in anim do
+			if not self:_visit(st, sid, rt, base, dots, ppt) then
+				anim[sid] = nil
+			end
 		end
 		return
 	end
 	self._dirty = false
 	self._cam_version = cam.version
-	local seen = self._seen
-	if seen == nil then
-		seen = {}
-		self._seen = seen
-	else
-		table.clear(seen)
-	end
-	local anim = self._anim
+	table.clear(touched)
 	table.clear(anim)
+	local pass = self._pass + 1
+	self._pass = pass
+	-- (MapCamera.tile_to_screen and on_screen worked out here, the same sums: every structure on the
+	-- map goes through them on every frame of a pan or a pinch, and off the screen that is all it
+	-- costs; two method calls each were most of it on a phone, which runs Luau without native code)
+	local ax, ay = cam:anchor()
+	local sc, cu, cv, W = cam.scale, cam.cu, cam.cv, cam.W
+	local vp = cam:viewport_size()
+	local vw, vh = vp.X, vp.Y
+	local plates = self._plates
 	for sid, s in st.structures do
-		local x, y = cam:tile_to_screen(s.tile)
+		local tile = s.tile
+		local x = ax + (tile % W + 0.5 - cu) * sc
+		local y = ay + (tile // W + 0.5 - cv) * sc
 		local size = base * (SHAPE_SCALE[s.kind + 1] or 1.0)
-		if not cam:on_screen(x, y, size) then
+		if not (x >= -size and y >= -size and x <= vw + size and y <= vh + size) then
 			continue
 		end
-		seen[sid] = true
-		local p = self._plates[sid]
+		local p = plates[sid]
 		if p == nil then
 			p = self:_acquire()
-			self._plates[sid] = p
+			plates[sid] = p
 		end
-		self:_place(p, s, rt, x, y, size, dots, ppt)
-		if StructureLayer.progress(s, rt) ~= nil or (s.active_tick or 0) > rt then
-			table.insert(anim, sid)
+		p.pass = pass
+		local progress = self:_place(p, s, rt, x, y, size, dots, ppt)
+		if progress ~= nil or (s.active_tick or 0) > rt then
+			anim[sid] = true
 		end
 	end
-	for sid, p in self._plates do
-		if not seen[sid] then
+	for sid, p in plates do
+		if p.pass ~= pass then
 			self:_release(p)
-			self._plates[sid] = nil
+			plates[sid] = nil
 		end
 	end
 end

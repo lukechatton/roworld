@@ -16,7 +16,9 @@
 -- Worked out on the CPU, so redrawn UPDATE_S apart, not every frame, its noise (the costly part)
 -- for as many blocks as NOISE_BUDGET_S allows each time, round robin (the noise moves over seconds);
 -- not written on a frame the map surface wrote one of its images (MapSurface: Roblox shows one
--- EditableImage update a frame), unless it has waited SKIP_MAX frames.
+-- EditableImage update a frame), unless it has waited SKIP_MAX frames. (2026-10-26, phones' slow
+-- frames: its lists, noise and buffers are kept from one draw to the next, and the label is placed
+-- again only when the camera moved.)
 local AssetService = game:GetService("AssetService")
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
@@ -127,11 +129,22 @@ function FalloutGlow.new(parent: Instance, view: any)
 	--- block -> its noise (broil before contrast, meta) and when it was worked out
 	self._noise = {} :: { [number]: { number } }
 	self._order = {} :: { number }
+	--- the hot blocks' next order (swapped with _order each draw)
+	self._live = {} :: { number }
 	self._rr = 1
 	self._next = 0.0
 	self._skipped = 0
-	--- the pixel box written last time (cleared next time if it shrinks)
+	--- the pixel box written last time (cleared next time if it shrinks; the table is kept)
 	self._box = nil :: { number }?
+	self._box_buf = { 0, 0, 0, 0 }
+	--- the label's last position and size (px)
+	self._lx, self._ly, self._lw, self._lh = math.huge, math.huge, -1, -1
+	--- the last box's pixels, and zeros of that size (WritePixelsBuffer takes a buffer of the box's
+	--- size exactly; made again only when the box's size changes)
+	self._out = nil :: buffer?
+	self._out_cells = -1
+	self._zero = nil :: buffer?
+	self._zero_cells = -1
 	return self
 end
 
@@ -282,12 +295,17 @@ local function extract(cx: number, cy: number, heat: number, rt: number, nz: { n
 	return math.min(r, 1), math.min(g, 1), math.min(bb, 1), math.min(a, 1)
 end
 
-local function noise_of(cx: number, cy: number, heat: number, rt: number): { number }
+--- (written into the block's own table, `into`, when it has one)
+local function noise_of(cx: number, cy: number, heat: number, rt: number, into: { number }?): { number }
 	local G = FalloutGlow
 	local t = rt * mix(G.BROIL_SPEED_COLD, G.BROIL_SPEED_HOT, heat)
 	local n1 = FalloutGlow.vnoise3(cx * G.NOISE_FREQ1, cy * G.NOISE_FREQ1, t)
 	local n2 = FalloutGlow.vnoise3(cx * G.NOISE_FREQ2, cy * G.NOISE_FREQ2, t * 1.3)
 	local meta = FalloutGlow.vnoise3(cx * G.META_FREQ, cy * G.META_FREQ, t * 0.5)
+	if into ~= nil then
+		into[1], into[2] = n1 * 0.6 + n2 * 0.4, meta
+		return into
+	end
 	return { n1 * 0.6 + n2 * 0.4, meta }
 end
 
@@ -317,11 +335,17 @@ function FalloutGlow.tick(self: any, _dt: number)
 		end
 		return
 	end
-	-- (laid over the map every frame; drawn again UPDATE_S apart)
+	-- (laid over the map, moved when the camera did; drawn again UPDATE_S apart)
 	local x0, y0 = cam:map_to_screen(0, 0)
 	local x1, y1 = cam:map_to_screen(W, H)
-	label.Position = UDim2.fromOffset(x0, y0)
-	label.Size = UDim2.fromOffset(x1 - x0, y1 - y0)
+	if x0 ~= self._lx or y0 ~= self._ly then
+		self._lx, self._ly = x0, y0
+		label.Position = UDim2.fromOffset(x0, y0)
+	end
+	if x1 - x0 ~= self._lw or y1 - y0 ~= self._lh then
+		self._lw, self._lh = x1 - x0, y1 - y0
+		label.Size = UDim2.fromOffset(x1 - x0, y1 - y0)
+	end
 	local now = FrameClock.now()
 	if now < self._next then
 		return
@@ -344,7 +368,12 @@ function FalloutGlow._clear_box(self: any)
 		return
 	end
 	local w, h = box[3] - box[1] + 1, box[4] - box[2] + 1
-	img:WritePixelsBuffer(Vector2.new(box[1], box[2]), Vector2.new(w, h), buffer.create(w * h * 4))
+	-- (zeros, never written to: kept while boxes of this size come and go)
+	if self._zero_cells ~= w * h then
+		self._zero_cells = w * h
+		self._zero = buffer.create(w * h * 4)
+	end
+	img:WritePixelsBuffer(Vector2.new(box[1], box[2]), Vector2.new(w, h), self._zero :: buffer)
 	self._box = nil
 end
 
@@ -356,9 +385,10 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 	local rt = st.render_tick or st.tick or 0
 	local own = st.owner
 	local decay = G.HEAT_DECAY_PER_TICK / 255
-	-- the hot blocks (the cold ones go) and their box
+	-- the hot blocks (the cold ones go) and their box (into the other list, swapped with this one)
 	local order = self._order
-	local live = {}
+	local live = self._live
+	table.clear(live)
 	local i0, j0, i1, j1 = math.huge, math.huge, -1, -1
 	for _, b in order do
 		local t0 = self._hot[b]
@@ -376,7 +406,7 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 		i0, j0 = math.min(i0, i), math.min(j0, j)
 		i1, j1 = math.max(i1, i), math.max(j1, j)
 	end
-	self._order = live
+	self._order, self._live = live, order
 	if #live == 0 then
 		self:_clear_box()
 		self.label.Visible = false
@@ -394,7 +424,7 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 		end
 		local heat = 1 - (rt - self._hot[b]) * decay
 		local cx, cy = (b % bw) * S + half + 0.5, (b // bw) * S + half + 0.5
-		self._noise[b] = noise_of(cx, cy, heat, rt)
+		self._noise[b] = noise_of(cx, cy, heat, rt, nz)
 		self._rr = (rr + k) % n + 1
 	end
 	-- the box, 2 blocks of blur either side, inside the image
@@ -407,10 +437,13 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 		self._cap = cells
 		self._grid = buffer.create(cells * 16)
 		self._tmp = buffer.create(cells * 16)
+	end
+	if self._out_cells ~= cells then
+		self._out_cells = cells
 		self._out = buffer.create(cells * 4)
 	end
 	local grid, tmp = self._grid, self._tmp
-	local out = if self._cap == cells then self._out else buffer.create(cells * 4)
+	local out = self._out :: buffer
 	buffer.fill(grid, 0, 0, cells * 16)
 	buffer.fill(out, 0, 0, cells * 4)
 	local writef32, readf32, writeu8 = buffer.writef32, buffer.readf32, buffer.writeu8
@@ -478,7 +511,9 @@ function FalloutGlow._draw(self: any, st: any, W: number)
 	end
 	local img = self._img :: EditableImage
 	img:WritePixelsBuffer(Vector2.new(i0, j0), Vector2.new(w, h), out)
-	self._box = { i0, j0, i1, j1 }
+	local nb = self._box_buf
+	nb[1], nb[2], nb[3], nb[4] = i0, j0, i1, j1
+	self._box = nb
 end
 
 return FalloutGlow

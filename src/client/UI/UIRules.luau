@@ -1019,8 +1019,9 @@ function UIRules._primary(self: any, tile: number): { [string]: any }
 	local troops = (o.troops or 0) * share
 	out.troops = troops
 	if troops < 1.0 then
-		-- (the tutorial's floor under the army: UICtx.troop_floor)
-		out.reason = if share < ctx.ratio then UICtx.data("Tutorial").FLOOR_REASON else "No troops available"
+		-- (the floor under a new player's army: UICtx.troop_floor)
+		out.floor = share < ctx.ratio
+		out.reason = if out.floor then UICtx.data("Tutorial").FLOOR_REASON else "No troops available"
 		return out
 	end
 	local land = false

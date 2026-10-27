@@ -93,9 +93,10 @@ type Piece = {
 --- A pool of GUI objects: what each was last given (written again only when it changes: a pan moves
 --- them and nothing else, a zoom sizes them; on a phone a late game's camera move rewrote six
 --- properties of every rail on screen each frame, 2026-10-12): its run or piece (and so its rotation
---- or image), colour, transparency, size.
+--- or image), colour, transparency, size, and position (2026-10-26: the recolouring every RECOLOR_S
+--- moved every rail on screen to where it already was).
 local function new_pool()
-	return { items = {}, run = {}, col = {}, a = {}, w = {}, h = {} }
+	return { items = {}, run = {}, col = {}, a = {}, w = {}, h = {}, x = {}, y = {} }
 end
 
 function RoadLayer.new(parent: Instance, view: any)
@@ -118,6 +119,8 @@ function RoadLayer.new(parent: Instance, view: any)
 	self._dirty = true
 	self._cam_version = -1
 	self._recolor = 0.0
+	--- owner -> rail colour, for one pass (see colour())
+	self._border = {} :: { [number]: Color3 }
 	return self
 end
 
@@ -337,15 +340,48 @@ local function trim(pool: any, n: number)
 	local items = pool.items
 	for j = #items, n + 1, -1 do
 		local b = items[j]
+		-- (an item is shown exactly while it has a run: no need to ask Roblox)
+		local shown = pool.run[j] ~= nil
 		pool.run[j] = nil
 		if j > n + RoadLayer.POOL_SPARE then
 			b:Destroy()
 			items[j] = nil
 			pool.col[j], pool.a[j], pool.w[j], pool.h[j] = nil, nil, nil, nil
-		elseif b.Visible then
+			pool.x[j], pool.y[j] = nil, nil
+		elseif shown then
 			b.Visible = false
 		end
 	end
+end
+
+--- A run's or piece's colour: the land under its middle tile, looked up again when `recolor` (else
+--- kept), the border colours of the pass in `border` (owner -> colour).
+local function colour(
+	st: any,
+	item: any,
+	recolor: boolean,
+	me: number,
+	mine: Color3,
+	border: { [number]: Color3 }
+): Color3
+	local col = item.col
+	if col == nil or recolor then
+		local own = st:tile_owner(item.mid)
+		if own == 0 then
+			col = RoadLayer.UNOWNED
+		elseif own == me then
+			col = mine
+		else
+			col = border[own]
+			if col == nil then
+				local c = st:owner_color(own)
+				col = Color3.new(MapSurface.darken(c.R, c.G, c.B, RoadLayer.BORDER_DARKEN))
+				border[own] = col
+			end
+		end
+		item.col = col
+	end
+	return col
 end
 
 function RoadLayer.tick(self: any, dt: number)
@@ -385,29 +421,11 @@ function RoadLayer.tick(self: any, dt: number)
 			mine = if luminance(st:owner_color(me)) > RoadLayer.LIGHT_ABOVE then RoadLayer.DARK else RoadLayer.LIGHT
 		end
 		-- (colours follow the land under the rails: looked up again every RECOLOR_S, not on every
-		-- camera move; the projection is done here, once per run, from the camera's anchor)
+		-- camera move; the projection is done here, once per run, from the camera's anchor; the
+		-- border colours are worked out again each pass, in a table kept for it)
 		local recolor = recolor_due
-		local border = {}
-		local function colour(item: any): Color3
-			local col = item.col
-			if col == nil or recolor then
-				local own = st:tile_owner(item.mid)
-				if own == 0 then
-					col = RoadLayer.UNOWNED
-				elseif own == me then
-					col = mine
-				else
-					col = border[own]
-					if col == nil then
-						local c = st:owner_color(own)
-						col = Color3.new(MapSurface.darken(c.R, c.G, c.B, RoadLayer.BORDER_DARKEN))
-						border[own] = col
-					end
-				end
-				item.col = col
-			end
-			return col
-		end
+		local border = self._border
+		table.clear(border)
 		local ax, ay = cam:anchor()
 		local s, cu, cv = cam.scale, cam.cu, cam.cv
 		local vp = cam._vp
@@ -433,7 +451,7 @@ function RoadLayer.tick(self: any, dt: number)
 					if mx < -w * 0.5 or my < -h * 0.5 or mx > vw + w * 0.5 or my > vh + h * 0.5 then
 						continue
 					end
-					local col = colour(pc)
+					local col = colour(st, pc, recolor, me, mine, border)
 					n_track += 1
 					local b = track.items[n_track]
 					if b == nil then
@@ -452,6 +470,7 @@ function RoadLayer.tick(self: any, dt: number)
 						track.col[n_track] = nil :: any
 						track.a[n_track] = -1
 						track.w[n_track] = -1
+						track.x[n_track] = nil
 						b.Visible = true
 						b.Image = RailArt[KIND_ART[pc.kind]]
 						-- a stretch repeats the tile once per tile (TileSize in scale: exact whatever the
@@ -471,7 +490,10 @@ function RoadLayer.tick(self: any, dt: number)
 						track.a[n_track] = a
 						b.ImageTransparency = 1 - a
 					end
-					b.Position = UDim2.fromOffset(mx, my)
+					if track.x[n_track] ~= mx or track.y[n_track] ~= my then
+						track.x[n_track], track.y[n_track] = mx, my
+						b.Position = UDim2.fromOffset(mx, my)
+					end
 					if track.w[n_track] ~= w or track.h[n_track] ~= h then
 						track.w[n_track], track.h[n_track] = w, h
 						b.Size = UDim2.fromOffset(w, h)
@@ -499,7 +521,7 @@ function RoadLayer.tick(self: any, dt: number)
 				if mx < -m or my < -m or mx > vw + m or my > vh + m then
 					continue
 				end
-				local col = colour(run)
+				local col = colour(st, run, recolor, me, mine, border)
 				n_bars += 1
 				local b = bars.items[n_bars]
 				if b == nil then
@@ -516,6 +538,7 @@ function RoadLayer.tick(self: any, dt: number)
 					bars.col[n_bars] = nil :: any
 					bars.a[n_bars] = -1
 					bars.w[n_bars] = -1
+					bars.x[n_bars] = nil
 					b.Visible = true
 					b.Rotation = run.rot
 				end
@@ -527,7 +550,10 @@ function RoadLayer.tick(self: any, dt: number)
 					bars.a[n_bars] = line_a
 					b.BackgroundTransparency = 1 - line_a
 				end
-				b.Position = UDim2.fromOffset(mx, my)
+				if bars.x[n_bars] ~= mx or bars.y[n_bars] ~= my then
+					bars.x[n_bars], bars.y[n_bars] = mx, my
+					b.Position = UDim2.fromOffset(mx, my)
+				end
 				-- a run spans its end tiles' centres; half a thickness more each way closes the corners
 				-- (corner tiles: two half-segments meeting at the centre)
 				local w = len + thick

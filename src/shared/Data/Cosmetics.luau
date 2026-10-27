@@ -311,6 +311,24 @@ Cosmetics.exclusive_skins = {
 --- How an exclusive item shows in the Locker (not a crate rarity: no odds).
 Cosmetics.EXCLUSIVE = { id = "exclusive", name = "Exclusive", odds = 0, color = 0xFF6FD8 }
 
+--- RoWorld General's skins (Data/Subscription; 2026-10-27): a new one each month for subscribers,
+--- who keep it. Never in a crate nor on a bot player, not in the Locker's "N of M"; only
+--- server/Purchases.general_perks gives one, and anyone given one may own it. Several colours, as an
+--- exclusive's.
+Cosmetics.general_skins = {
+	{
+		-- a ribbon: a navy band edged and studded in gold
+		id = "gen_chevrons",
+		name = "Officer's Braid",
+		scale = 1,
+		alpha = 200,
+		colors = { 0xE2BC58, 0x1C2740 },
+		mask = { "11111111", "22222222", "22122212", "22222222", "11111111", "........", "........", "........" },
+	},
+}
+--- How a General skin shows in the Locker.
+Cosmetics.GENERAL = { id = "general", name = "General", odds = 0, color = 0xD9B24E }
+
 --- Alpha of the secondary tiles (the primary fill is MapSurface.TERRITORY_ALPHA, 150).
 Cosmetics.SECONDARY_ALPHA = 190
 
@@ -346,6 +364,17 @@ for _, s in Cosmetics.exclusive_skins do
 		granted[uid] = granted[uid] or {}
 		table.insert(granted[uid], it.id)
 	end
+end
+
+-- (General skins resolve by id too, and stay out of `order` like the exclusives)
+local generals: { Item } = {}
+for _, g in Cosmetics.general_skins do
+	local it: any = table.clone(g)
+	it.kind = "skin"
+	it.rarity = "general"
+	it.general = true
+	items[it.id] = it
+	table.insert(generals, it)
 end
 
 -- (shop flags resolve by id too, and stay out of `order` like the exclusives)
@@ -385,6 +414,11 @@ function Cosmetics.exclusives(): { Item }
 	return exclusives
 end
 
+--- RoWorld General's skins (Cosmetics.general_skins), as items.
+function Cosmetics.generals(): { Item }
+	return generals
+end
+
 --- The flag shop's flags (Data/Shop), as items.
 function Cosmetics.shop_items(): { Item }
 	return shop_items
@@ -418,7 +452,7 @@ function Cosmetics.crate_owned(owned: { [string]: any }): number
 	local n = 0
 	for id in owned do
 		local it = items[id]
-		if it ~= nil and not it.exclusive and not it.shop then
+		if it ~= nil and not it.exclusive and not it.shop and not it.general then
 			n += 1
 		end
 	end
@@ -428,6 +462,8 @@ end
 function Cosmetics.rarity(id: string): any
 	if id == "exclusive" then
 		return Cosmetics.EXCLUSIVE
+	elseif id == "general" then
+		return Cosmetics.GENERAL
 	end
 	for _, r in Cosmetics.RARITIES do
 		if r.id == id then

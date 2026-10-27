@@ -8,6 +8,10 @@
 --   covering it (hot: thicker, pulsing; aim_sams() counts them); boat aim / "attack_aim": the
 --   target owner's posts; hovered / focused sites; the build preview ring (+ own rings of that
 --   kind at full strength). "nuke_aim", "all", "none" as in the globe layer.
+-- (2026-10-26, phones' slow frames: a ring remembers what it was last given and is written only what
+-- changed, where every ring on screen was written eight properties a frame; the rings are chosen
+-- again only when what they show changes: not for a missile fired, and while a SAM's range grows
+-- after an upgrade only that ring's radius follows it, a game tick at a time.)
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
 local Defs = require(Airfront:WaitForChild("Core"):WaitForChild("Defs")) :: any
@@ -40,8 +44,28 @@ local RINGED = {
 
 local HOSTILE_TINT = Color3.new(1.0, 0.2, 0.16)
 local WHITE = Color3.new(1, 1, 1)
+local HOT_COLOR = HOSTILE_TINT:Lerp(Color3.new(1.0, 0.45, 0.35), 0.25)
+--- a site without levels yet (read only)
+local NO_LVL = { 1, 0, -100000 }
 
-type Ring = { frame: Frame, stroke: UIStroke }
+--- A ring and what its frame and stroke were last given (Roblox's own values, kept here: a ring
+--- shown for another site still shows them, so nothing needs resetting).
+type Ring = {
+	frame: Frame,
+	stroke: UIStroke,
+	vis: boolean,
+	x: number,
+	y: number,
+	d: number,
+	col: Color3?,
+	fill_t: number,
+	stroke_col: Color3?,
+	width: number,
+	stroke_t: number,
+}
+--- A ring to draw: map tile, radius (tiles), class, colour; `sid` a SAM's, `grows` while its range
+--- grows after an upgrade (kept from one choice to the next: rewritten, not made again).
+type Want = { tile: number, r: number, cls: number, col: Color3, sid: number, grows: boolean }
 
 function RangeLayer.new(parent: Instance, view: any)
 	local self = setmetatable({}, RangeLayer) :: any
@@ -68,12 +92,18 @@ function RangeLayer.new(parent: Instance, view: any)
 	self._hover_owner = 0
 	self._hover_focus = -1
 	self._ui_focus = -1
-	self._want = {} :: { any }
+	--- the rings to draw: the first _want_n of _want
+	self._want = {} :: { Want }
+	self._want_n = 0
 	self._dirty = true
 	self._next_change = math.huge
+	--- the game tick the growing SAM rings' radii are for (nil: none grows)
+	self._grow_tick = nil :: number?
 	self._last_local = -1
 	self._rings = {} :: { Ring }
 	self._unit = nil :: any
+	--- (the selected warship's rings, rewritten every frame it is selected)
+	self._unit_rings = {} :: { [string]: any }
 	self._now = 0.0
 	return self
 end
@@ -92,9 +122,14 @@ function RangeLayer.unbind(self: any)
 	self._hover_focus = -1
 	self._ui_focus = -1
 	table.clear(self._want)
+	self._want_n = 0
+	self._grow_tick = nil
 	self._unit = nil
 	for _, r in self._rings do
-		r.frame.Visible = false
+		if r.vis then
+			r.vis = false
+			r.frame.Visible = false
+		end
 	end
 end
 
@@ -133,7 +168,13 @@ function RangeLayer.on_structure_leveled(self: any, sid: number)
 	if s == nil or self._sites[sid] == nil then
 		return
 	end
-	local old = self._lvl[sid] or { s.level, s.active_tick, -100000 }
+	local was = self._lvl[sid]
+	if was ~= nil and was[1] == s.level and was[2] == s.active_tick then
+		-- a missile fired or reloaded (Ev.STRUCT_SHOTS comes as structure_leveled too): the range is
+		-- as it was, and choosing every ring again for each shot of a late game's SAM wall cost the most
+		return
+	end
+	local old = was or { s.level, s.active_tick, -100000 }
 	local up = old[3]
 	if s.level > old[1] then
 		up = self._state.tick
@@ -211,16 +252,28 @@ function RangeLayer.set_focus_tile(self: any, tile: number, px_tiles: number)
 	end
 end
 
---- Selected warship: patrol ring around `patrol` and targeting ring around `at` (map tiles).
+--- Selected warship: patrol ring around map point (pu, pv) and targeting ring around (au, av), radii
+--- in tiles, `col` its owner's colour. (Called every frame a warship is selected: plain numbers and
+--- one table kept, the tints worked out when the colour changes.)
 function RangeLayer.set_unit_rings(
 	self: any,
-	patrol: Vector2,
+	pu: number,
+	pv: number,
 	patrol_r: number,
-	at: Vector2,
+	au: number,
+	av: number,
 	target_r: number,
 	col: Color3
 )
-	self._unit = { patrol = patrol, patrol_r = patrol_r, at = at, target_r = target_r, col = col }
+	local ur = self._unit_rings
+	ur.pu, ur.pv, ur.patrol_r = pu, pv, patrol_r
+	ur.au, ur.av, ur.target_r = au, av, target_r
+	if ur.col ~= col then
+		ur.col = col
+		ur.patrol_col = col:Lerp(WHITE, 0.4)
+		ur.target_col = col:Lerp(WHITE, 0.3)
+	end
+	self._unit = ur
 end
 
 function RangeLayer.clear_unit_rings(self: any)
@@ -276,7 +329,7 @@ function RangeLayer._range_of(self: any, sid: number, kind: number, cur: number)
 	elseif kind ~= Defs.S_SAM then
 		return VR.defense_range()
 	end
-	local l = self._lvl[sid] or { 1, 0, -100000 }
+	local l = self._lvl[sid] or NO_LVL
 	return VR.sam_range_at(l[1], cur - l[3])
 end
 
@@ -333,10 +386,23 @@ function RangeLayer._sites_near(self: any, tile: number, px_tiles: number): numb
 	return best_sid
 end
 
+--- The next ring to draw (the list's records are kept from one choice to the next).
+local function push(self: any, tile: number, r: number, cls: number, col: Color3, sid: number, grows: boolean)
+	local n = self._want_n + 1
+	self._want_n = n
+	local w = self._want[n]
+	if w == nil then
+		w = {} :: any
+		self._want[n] = w
+	end
+	w.tile, w.r, w.cls, w.col, w.sid, w.grows = tile, r, cls, col, sid, grows
+end
+
 function RangeLayer._rebuild(self: any)
 	local state = self._state
 	local VR = self.VR
-	table.clear(self._want)
+	self._want_n = 0
+	self._grow_tick = nil
 	if state == nil or VR == nil then
 		return
 	end
@@ -360,20 +426,26 @@ function RangeLayer._rebuild(self: any)
 	local bk = self:_build_kind()
 	local upgrading = bk >= 0 and self._aim_tile >= 0 and self._aim_level > 1
 	local NEAR2 = RangeLayer.NEAR_AIM * RangeLayer.NEAR_AIM
-	local want = self._want
 	for sid, s in self._sites do
-		if #want >= RangeLayer.MAX_RINGS - 1 then
+		if self._want_n >= RangeLayer.MAX_RINGS - 1 then
 			break
 		end
 		if upgrading and s[3] == self._aim_tile and s[1] == bk then
 			continue
 		end
-		local l = self._lvl[sid] or { 1, 0, -100000 }
+		local l = self._lvl[sid] or NO_LVL
 		local pending = l[2] > cur
+		local grows = false
 		if pending then
 			self._next_change = math.min(self._next_change, l[2])
 		elseif s[1] == Defs.S_SAM and cur - l[3] < grow_ticks then
-			self._next_change = cur + 1
+			if aiming_nuke then
+				-- (the hot SAMs and those near the aim follow the radius: all chosen again each tick)
+				self._next_change = cur + 1
+			else
+				-- (only its radius changes: tick() follows it, _regrow)
+				grows = true
+			end
 		end
 		local r = self:_range_of(sid, s[1], cur)
 		local own = local_id ~= 0 and s[2] == local_id
@@ -430,29 +502,57 @@ function RangeLayer._rebuild(self: any)
 		elseif cls == C_HOSTILE then
 			col = col:Lerp(HOSTILE_TINT, 0.62)
 		elseif cls == C_HOT then
-			col = HOSTILE_TINT:Lerp(Color3.new(1.0, 0.45, 0.35), 0.25)
+			col = HOT_COLOR
 		elseif cls == C_FOCUS then
 			col = if hostile then col:Lerp(HOSTILE_TINT, 0.55) else col:Lerp(WHITE, 0.3)
 		else
 			col = if hostile then col:Lerp(HOSTILE_TINT, 0.35) else col:Lerp(WHITE, 0.3)
 		end
-		table.insert(want, { tile = s[3], r = r, cls = cls, col = col })
+		push(self, s[3], r, cls, col, sid, grows)
+		if grows then
+			self._grow_tick = cur
+		end
 	end
 	if bk >= 0 and self._aim_tile >= 0 then
 		-- the ghost's range is a white disc (20 % fill) with a bright edge
 		local bc = WHITE
-		table.insert(want, {
-			tile = self._aim_tile,
-			r = if bk == Defs.S_SAM
+		push(
+			self,
+			self._aim_tile,
+			if bk == Defs.S_SAM
 				then VR.sam_range(self._aim_level)
 				elseif bk == Defs.S_FACTORY then VR.factory_range()
 				elseif bk == Defs.S_ARTILLERY then VR.artillery_range()
 				elseif bk == Defs.S_AIRFIELD then VR.airfield_range()
 				else VR.defense_range(),
-			cls = C_BUILD,
-			col = bc,
-		})
+			C_BUILD,
+			bc,
+			-1,
+			false
+		)
 	end
+end
+
+--- A game tick on while SAM rings grow after an upgrade (nothing else changed): their radii follow
+--- it, as a full _rebuild would have made them.
+function RangeLayer._regrow(self: any, cur: number)
+	local grow_ticks = self.VR.sam_upgrade_ticks()
+	local any = false
+	local want = self._want
+	for i = 1, self._want_n do
+		local w = want[i]
+		if not w.grows then
+			continue
+		end
+		w.r = self:_range_of(w.sid, Defs.S_SAM, cur)
+		local l = self._lvl[w.sid] or NO_LVL
+		if cur - l[3] < grow_ticks then
+			any = true
+		else
+			w.grows = false
+		end
+	end
+	self._grow_tick = if any then cur else nil
 end
 
 -- ---------------------------------------------------------------------------------------------
@@ -476,7 +576,20 @@ function RangeLayer._ring(self: any, i: number): Ring
 	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	s.Parent = f
 	f.Parent = self.root
-	r = { frame = f, stroke = s }
+	-- (what a new Frame and UIStroke show: every value is written on the first draw)
+	r = {
+		frame = f,
+		stroke = s,
+		vis = true,
+		x = math.huge,
+		y = math.huge,
+		d = -1,
+		col = nil,
+		fill_t = -1,
+		stroke_col = nil,
+		width = -1,
+		stroke_t = -1,
+	}
 	self._rings[i] = r
 	return r
 end
@@ -505,14 +618,44 @@ function RangeLayer._draw(
 	i += 1
 	local r = self:_ring(i)
 	local pulse = if PULSE[cls + 1] then 0.5 + 0.5 * math.sin(self._now * 5.0) else 0.0
-	r.frame.Visible = true
-	r.frame.Position = UDim2.fromOffset(x, y)
-	r.frame.Size = UDim2.fromOffset(d, d)
-	r.frame.BackgroundColor3 = col
-	r.frame.BackgroundTransparency = 1 - FILL_A[cls + 1] * k * (1 + 0.3 * pulse)
-	r.stroke.Color = col
-	r.stroke.Thickness = WIDTH[cls + 1] * (1 + 0.25 * pulse)
-	r.stroke.Transparency = 1 - RING_A[cls + 1] * k
+	-- (each written only when it changed: a still view of idle rings writes nothing, a pan only the
+	-- positions, the pulsing ones their fill and stroke)
+	local f, s = r.frame, r.stroke
+	if not r.vis then
+		r.vis = true
+		f.Visible = true
+	end
+	if r.x ~= x or r.y ~= y then
+		r.x, r.y = x, y
+		f.Position = UDim2.fromOffset(x, y)
+	end
+	if r.d ~= d then
+		r.d = d
+		f.Size = UDim2.fromOffset(d, d)
+	end
+	if r.col ~= col then
+		r.col = col
+		f.BackgroundColor3 = col
+	end
+	local fill_t = 1 - FILL_A[cls + 1] * k * (1 + 0.3 * pulse)
+	if r.fill_t ~= fill_t then
+		r.fill_t = fill_t
+		f.BackgroundTransparency = fill_t
+	end
+	if r.stroke_col ~= col then
+		r.stroke_col = col
+		s.Color = col
+	end
+	local width = WIDTH[cls + 1] * (1 + 0.25 * pulse)
+	if r.width ~= width then
+		r.width = width
+		s.Thickness = width
+	end
+	local stroke_t = 1 - RING_A[cls + 1] * k
+	if r.stroke_t ~= stroke_t then
+		r.stroke_t = stroke_t
+		s.Transparency = stroke_t
+	end
 	return i
 end
 
@@ -534,30 +677,38 @@ function RangeLayer.tick(self: any, dt: number?)
 		self._dirty = false
 		self:_update_hot()
 		self:_rebuild()
+	elseif self._grow_tick ~= nil and cur > self._grow_tick then
+		self:_regrow(cur)
 	end
 	local cam = self.view.rig
 	local W = state.map.W or Defs.W
 	local cam_d = cam:scale_to_distance(cam.scale)
+	-- own idle rings fade with the zoom (the same for all of a class)
+	local k_sam = 1 - smoothstep(OWN_SAM_FADE[1], OWN_SAM_FADE[2], cam_d)
+	local k_def = 1 - smoothstep(OWN_DEF_FADE[1], OWN_DEF_FADE[2], cam_d)
 	local i = 0
-	for _, w in self._want do
+	local want = self._want
+	for n = 1, self._want_n do
+		local w = want[n]
 		local k = 1.0
 		if w.cls == C_OWN_SAM then
-			k = 1 - smoothstep(OWN_SAM_FADE[1], OWN_SAM_FADE[2], cam_d)
+			k = k_sam
 		elseif w.cls == C_OWN_DEF then
-			k = 1 - smoothstep(OWN_DEF_FADE[1], OWN_DEF_FADE[2], cam_d)
+			k = k_def
 		end
 		i = self:_draw(i, w.tile % W + 0.5, w.tile // W + 0.5, w.r, w.cls, w.col, k)
 	end
 	local ur = self._unit
 	if ur ~= nil then
 		if ur.patrol_r > 0 then
-			i = self:_draw(i, ur.patrol.X, ur.patrol.Y, ur.patrol_r, C_OWN_HI, ur.col:Lerp(WHITE, 0.4), 1)
+			i = self:_draw(i, ur.pu, ur.pv, ur.patrol_r, C_OWN_HI, ur.patrol_col, 1)
 		end
-		i = self:_draw(i, ur.at.X, ur.at.Y, ur.target_r, C_FOCUS, ur.col:Lerp(WHITE, 0.3), 1)
+		i = self:_draw(i, ur.au, ur.av, ur.target_r, C_FOCUS, ur.target_col, 1)
 	end
 	for j = i + 1, #self._rings do
 		local r = self._rings[j]
-		if r.frame.Visible then
+		if r.vis then
+			r.vis = false
 			r.frame.Visible = false
 		end
 	end

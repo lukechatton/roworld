@@ -353,6 +353,8 @@ function UICtx.new()
 	self.state_bound = Signal.new()
 	self.layout_changed = Signal.new()
 	self.ratio_changed = Signal.new()
+	--- an order was held back by troop_floor: trimmed to what may go, or not sent (UIAdvisor says why)
+	self.floor_held = Signal.new()
 	self.local_changed = Signal.new()
 
 	self.session = nil :: any
@@ -734,6 +736,9 @@ function UICtx.send(self: any, intent: { [string]: any })
 	-- nothing to send is not sent at all
 	if self.troop_floor ~= nil and (intent.type == "attack" or intent.type == "boat") then
 		local share = math.min(tonumber(intent.ratio) or self.ratio, self:floor_share())
+		if share < self.ratio - 1e-6 then
+			self.floor_held:Fire()
+		end
 		if share <= 0.001 then
 			return
 		end

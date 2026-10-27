@@ -19,6 +19,9 @@ local PRODUCTS: { [string]: any } = {
 	--- Three crates at once (2026-10-19: 100 Robux instead of 120,
 	--- three crates being 3 x 40 at their price): `count` crate credits for one receipt.
 	crate3 = { id = 3720068382, robux = 100, grants = "crate", count = 3, staging = 3720061533 },
+	--- Ten crates at once (2026-10-27: a buy to come back to above 100 Robux; a paying player spent 89
+	--- Robux on average, top experiences about 600): 299, about 30 a crate.
+	crate10 = { id = 3722748768, robux = 299, grants = "crate", count = 10, staging = 3722748745 },
 	--- The Arsenal (Data/Arsenal; 2026-10-04), at Pixel Conquest's prices.
 	unlock_mega = { id = 3716621701, robux = 39, grants = "unlock:mega", staging = 3716609998 },
 	unlock_scatter = { id = 3716621706, robux = 67, grants = "unlock:scatter", staging = 3716610004 },

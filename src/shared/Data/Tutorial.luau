@@ -35,13 +35,34 @@ Tutorial.RATIO_CAP = 0.5
 --- runs an order leaves at least TROOP_FLOOR of the army's cap at home (it is trimmed to what may go,
 --- and refused when nothing may). The floor holds from the first time the army reaches FLOOR_ARM of
 --- its cap: a new nation starts below it.
+---   * Not before the FLOOR_FROM step (2026-10-27): on "grow" it refused the very taps the card
+---     asked for ("Troops low. Let them grow back" under "Keep tapping empty land"), since the
+---     cap climbs with every tile taken. Grow lost 11.6% of the players who reached it, the most of
+---     any step, and 110,302 of its 175,898 left with Skip (the week to 2026-10-26). Before the first
+---     neighbour there is nobody to fear, and the Attack bar's cap (RATIO_CAP) still holds.
 Tutorial.TROOP_FLOOR = 0.25
 Tutorial.FLOOR_ARM = 0.35
+Tutorial.FLOOR_FROM = "attack"
 Tutorial.FLOOR_REASON = "Troops low. Let them grow back"
+--- A new player's first ROOKIE_MATCHES matches (the tutorial's among them) keep a floor under the
+--- army after the tutorial too (2026-10-27): an order leaves ROOKIE_FLOOR of the army's cap at home,
+--- from the first time the army reaches FLOOR_ARM of it (client/UI/UIAdvisor.check_floor). An army
+--- spent below a fifth of its cap all but loses the match, and 23% of matches ended within their
+--- first 3 minutes (Match funnel, the week to 2026-10-26). The first order held back in a match
+--- says why (Coach "floor").
+Tutorial.ROOKIE_MATCHES = 5
+Tutorial.ROOKIE_FLOOR = 0.2
+
+--- True while a player with `matches_before` matches before this one is still a new player.
+function Tutorial.rookie(matches_before: number): boolean
+	return matches_before < Tutorial.ROOKIE_MATCHES
+end
 --- Seconds on the spawn step before a start is picked for the player.
 Tutorial.AUTO_SPAWN_S = 12
 --- "grow": GROW_TAPS more orders, and this many times the land the nation had when the step began (at
 --- least GROW_MIN tiles more). On open land one order alone triples a new nation, so the taps count.
+--- The card counts the taps down (grow_line), and the mark shows where to tap from the start, not
+--- after NUDGE_S (2026-10-27: "Keep tapping" gave no end to aim for).
 Tutorial.GROW_TAPS = 3
 Tutorial.GROW_FACTOR = 3
 Tutorial.GROW_MIN = 300
@@ -127,6 +148,25 @@ end
 --- The land "grow" asks for, from the land the nation had when the step began.
 function Tutorial.grow_goal(tiles: number): number
 	return math.floor(math.max(tiles * Tutorial.GROW_FACTOR, tiles + Tutorial.GROW_MIN))
+end
+
+--- The "grow" card with `left` taps to go (the step's own line once they are all in).
+function Tutorial.grow_line(left: number, touch: boolean): string
+	if left <= 0 then
+		local step = Tutorial.STEPS[Tutorial.step_index("grow") :: number]
+		return if touch then step.touch else step.desktop
+	end
+	return string.format("%s empty land %d more time%s", if touch then "Tap" else "Click", left, if left == 1 then "" else "s")
+end
+
+--- Where step `id` is in STEPS, or nil.
+function Tutorial.step_index(id: string): number?
+	for i, s in Tutorial.STEPS do
+		if s.id == id then
+			return i
+		end
+	end
+	return nil
 end
 
 return Tutorial

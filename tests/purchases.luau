@@ -528,6 +528,14 @@ do
 	end
 	expect(distinct == 3 and rows.u64.credits.crate == 0, "three crates open to three different items")
 	Products.crate3.id = 0
+	-- and the 10-crate pack (2026-10-27): ten credits for one receipt
+	local kind10, n10 = Purchases.kind_of(Products.crate10.id)
+	expect(kind10 == "crate" and n10 == 10, "the 10-pack grants 10 crates")
+	expect(
+		Purchases.process_receipt({ PlayerId = 64, ProductId = Products.crate10.id, PurchaseId = "p10" }) == "granted",
+		"a 10-pack receipt is granted"
+	)
+	expect(rows.u64.credits.crate == 10 and rows.u64.crates_bought == 13, "10 crate credits, 13 bought in all")
 end
 
 if fails > 0 then

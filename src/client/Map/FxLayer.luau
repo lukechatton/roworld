@@ -27,6 +27,9 @@
 -- smoke and smoke with fire (DEBRIS_PLAN, looping) scattered within half its radius, 6 s, fading in
 -- over the first 10 % and out after 80 %; its ring grows to 1.5 x that radius. The radius is the
 -- look's (NUKE_FX_RADIUS), not the blast's.
+-- Every pooled object remembers what it was last given and is written only what changed (2026-10-26,
+-- phones' slow frames: a nuke's 240 debris sprites were written six properties each a frame, with the
+-- view still and between their frames), and spent effects leave their lists in one pass, in order.
 local ContentProvider = game:GetService("ContentProvider")
 local RS = game:GetService("ReplicatedStorage")
 local Airfront = RS:WaitForChild("Airfront")
@@ -128,11 +131,74 @@ FxLayer.WARHEAD_WINDOW_S = 10.0
 
 type Fx = { u: number, v: number, r0: number, r1: number, t0: number, dur: number, col: Color3, flash: boolean }
 type Pop = { u: number, v: number, t0: number, text: string, col: Color3 }
-type PopGui = { flag: ImageLabel, banner: ImageLabel, gold: TextLabel, stroke: UIStroke }
+--- The pools' GUI objects, each with what it was last given (Roblox's own values, kept here: an object
+--- shown for another effect still shows them, so nothing needs resetting; `vis` its Visible).
+type FxGui = {
+	frame: Frame,
+	stroke: UIStroke,
+	vis: boolean,
+	x: number,
+	y: number,
+	d: number,
+	col: Color3?,
+	fill_t: number,
+	stroke_col: Color3?,
+	width: number,
+	stroke_t: number,
+}
+--- (`vis` for all three: they show and hide together)
+type PopGui = {
+	flag: ImageLabel,
+	banner: ImageLabel,
+	gold: TextLabel,
+	stroke: UIStroke,
+	vis: boolean,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	img_t: number,
+	flag_ox: number,
+	flag_oy: number,
+	banner_ox: number,
+	banner_oy: number,
+	col: Color3?,
+	text: string?,
+	text_size: number,
+	gold_x: number,
+	gold_y: number,
+	text_t: number,
+	width: number,
+	stroke_t: number,
+}
 --- (`life`, `fade_in`, `fade_out`: debris only; a burst ends with its last frame)
 type Burst = { u: number, v: number, t0: number, row: any, life: number?, fade_in: number?, fade_out: number? }
+type BurstGui = {
+	img: ImageLabel,
+	vis: boolean,
+	x: number,
+	y: number,
+	w: number,
+	h: number,
+	rw: number,
+	rh: number,
+	ox: number,
+	oy: number,
+	img_t: number,
+}
 type Bonus = { u: number, v: number, t0: number, text: string }
-type BonusGui = { label: TextLabel, stroke: UIStroke }
+type BonusGui = {
+	label: TextLabel,
+	stroke: UIStroke,
+	vis: boolean,
+	text: string?,
+	size: number,
+	x: number,
+	y: number,
+	text_t: number,
+	width: number,
+	stroke_t: number,
+}
 
 function FxLayer.new(parent: Instance, view: any)
 	local self = setmetatable({}, FxLayer) :: any
@@ -146,13 +212,13 @@ function FxLayer.new(parent: Instance, view: any)
 	self.view = view
 	self._state = nil :: any
 	self._fx = {} :: { Fx }
-	self._frames = {} :: { Frame }
+	self._frames = {} :: { FxGui }
 	self._pops = {} :: { Pop }
 	self._pop_gui = {} :: { PopGui }
 	self._bursts = {} :: { Burst }
-	self._burst_gui = {} :: { ImageLabel }
+	self._burst_gui = {} :: { BurstGui }
 	self._debris = {} :: { Burst }
-	self._debris_gui = {} :: { ImageLabel }
+	self._debris_gui = {} :: { BurstGui }
 	--- a strike's warheads: those landed lately (times) and in flight (counted once a frame)
 	self._warheads_landed = {} :: { number }
 	self._warheads_flying = 0
@@ -186,19 +252,24 @@ function FxLayer.unbind(self: any)
 	table.clear(self._debris)
 	table.clear(self._warheads_landed)
 	table.clear(self._bonus)
-	for _, f in self._frames do
-		f.Visible = false
+	for _, g in self._frames do
+		g.vis = false
+		g.frame.Visible = false
 	end
 	for _, g in self._bonus_gui do
+		g.vis = false
 		g.label.Visible = false
 	end
 	for _, g in self._burst_gui do
-		g.Visible = false
+		g.vis = false
+		g.img.Visible = false
 	end
 	for _, g in self._debris_gui do
-		g.Visible = false
+		g.vis = false
+		g.img.Visible = false
 	end
 	for _, g in self._pop_gui do
+		g.vis = false
 		g.flag.Visible = false
 		g.banner.Visible = false
 		g.gold.Visible = false
@@ -448,21 +519,28 @@ function FxLayer.bonus(self: any, tile: number, gold: number)
 	})
 end
 
+--- Drop a list's entries from n + 1 on (the spent ones were left behind as the live ones moved up).
+local function truncate(list: { any }, n: number)
+	for i = #list, n + 1, -1 do
+		list[i] = nil
+	end
+end
+
 local function bonus_step(self: any, cam: any, now: number)
 	local st = self._state
 	local k = tonumber(st and st.map and st.map.k_lin) or Rules.K_LIN
 	local zoom = cam.scale / k -- px per full-size tile
 	local n = 0
-	local i = 1
 	local list = self._bonus
-	while i <= #list do
+	local keep = 0
+	for i = 1, #list do
 		local b = list[i]
 		local el = now - b.t0
 		if el >= FxLayer.BONUS_S then
-			table.remove(list, i)
 			continue
 		end
-		i += 1
+		keep += 1
+		list[keep] = b
 		if zoom < FxLayer.BONUS_CULL_ZOOM then
 			continue
 		end
@@ -491,22 +569,58 @@ local function bonus_step(self: any, cam: any, now: number)
 			stroke.Color = Color3.new(0, 0, 0)
 			stroke.LineJoinMode = Enum.LineJoinMode.Round
 			stroke.Parent = label
-			g = { label = label, stroke = stroke }
+			g = {
+				label = label,
+				stroke = stroke,
+				vis = true,
+				text = nil,
+				size = -1,
+				x = math.huge,
+				y = math.huge,
+				text_t = -1,
+				width = -1,
+				stroke_t = -1,
+			}
 			self._bonus_gui[n] = g
 		end
 		local t = el / FxLayer.BONUS_S
 		local label = g.label
-		label.Visible = true
-		label.Text = b.text
-		label.TextSize = fs
-		label.Position = UDim2.fromOffset(x, y)
-		label.TextTransparency = t
-		g.stroke.Thickness = math.max(1.5, fs * 0.12)
-		g.stroke.Transparency = t
+		if not g.vis then
+			g.vis = true
+			label.Visible = true
+		end
+		-- (the text and its size seldom change: each write of them makes Roblox measure the text again)
+		if g.text ~= b.text then
+			g.text = b.text
+			label.Text = b.text
+		end
+		if g.size ~= fs then
+			g.size = fs
+			label.TextSize = fs
+		end
+		if g.x ~= x or g.y ~= y then
+			g.x, g.y = x, y
+			label.Position = UDim2.fromOffset(x, y)
+		end
+		if g.text_t ~= t then
+			g.text_t = t
+			label.TextTransparency = t
+		end
+		local width = math.max(1.5, fs * 0.12)
+		if g.width ~= width then
+			g.width = width
+			g.stroke.Thickness = width
+		end
+		if g.stroke_t ~= t then
+			g.stroke_t = t
+			g.stroke.Transparency = t
+		end
 	end
+	truncate(list, keep)
 	for j = n + 1, #self._bonus_gui do
 		local g = self._bonus_gui[j]
-		if g.label.Visible then
+		if g.vis then
+			g.vis = false
 			g.label.Visible = false
 		end
 	end
@@ -546,24 +660,48 @@ local function pop_gui(self: any, n: number): PopGui
 	stroke.Color = Color3.new(0, 0, 0)
 	stroke.LineJoinMode = Enum.LineJoinMode.Round
 	stroke.Parent = gold
-	g = { flag = flag, banner = banner, gold = gold, stroke = stroke }
+	g = {
+		flag = flag,
+		banner = banner,
+		gold = gold,
+		stroke = stroke,
+		vis = true,
+		x = math.huge,
+		y = math.huge,
+		w = -1,
+		h = -1,
+		img_t = -1,
+		flag_ox = -1,
+		flag_oy = -1,
+		banner_ox = -1,
+		banner_oy = -1,
+		col = nil,
+		text = nil,
+		text_size = -1,
+		gold_x = math.huge,
+		gold_y = math.huge,
+		text_t = -1,
+		width = -1,
+		stroke_t = -1,
+	}
 	self._pop_gui[n] = g
-	return g
+	return g :: PopGui
 end
 
 local function pops_step(self: any, cam: any, now: number)
 	local st = self._state
 	local k = tonumber(st and st.map and st.map.k_lin) or Rules.K_LIN
 	local n = 0
-	local i = 1
-	while i <= #self._pops do
-		local p = self._pops[i]
+	local list = self._pops
+	local keep = 0
+	for i = 1, #list do
+		local p = list[i]
 		local el = now - p.t0
 		if el >= FxLayer.CONQUEST_S then
-			table.remove(self._pops, i)
 			continue
 		end
-		i += 1
+		keep += 1
+		list[keep] = p
 		local x, y = cam:map_to_screen(p.u, p.v)
 		local sw = math.max(FxLayer.FLAG_MIN_PX, FxLayer.FLAG_WORLD / k * cam.scale)
 		if not cam:on_screen(x, y, sw * 2) then
@@ -580,32 +718,84 @@ local function pops_step(self: any, cam: any, now: number)
 		end
 		local F, B = FxLayer.FLAG, FxLayer.BANNER
 		local frame = math.min(math.floor(el / FxLayer.FLAG_FRAME_S), F.frames - 1)
-		local size = UDim2.fromOffset(sw, sw * F.h / F.w)
-		for _, l in { g.flag, g.banner } do
-			l.Visible = true
-			l.Position = UDim2.fromOffset(x, y)
-			l.Size = size
-			l.ImageTransparency = 1 - a
+		local flag, banner = g.flag, g.banner
+		-- the flag and its cloth: one place, size and fade
+		if not g.vis then
+			g.vis = true
+			flag.Visible = true
+			banner.Visible = true
+			g.gold.Visible = true
 		end
-		g.flag.ImageRectOffset = Vector2.new(F.x + frame * F.w, F.y)
-		g.banner.ImageRectOffset = Vector2.new(B.x + frame * B.w, B.y)
-		g.banner.ImageColor3 = p.col
+		if g.x ~= x or g.y ~= y then
+			g.x, g.y = x, y
+			local pos = UDim2.fromOffset(x, y)
+			flag.Position = pos
+			banner.Position = pos
+		end
+		local sh = sw * F.h / F.w
+		if g.w ~= sw or g.h ~= sh then
+			g.w, g.h = sw, sh
+			local size = UDim2.fromOffset(sw, sh)
+			flag.Size = size
+			banner.Size = size
+		end
+		local img_t = 1 - a
+		if g.img_t ~= img_t then
+			g.img_t = img_t
+			flag.ImageTransparency = img_t
+			banner.ImageTransparency = img_t
+		end
+		local fox, foy = F.x + frame * F.w, F.y
+		if g.flag_ox ~= fox or g.flag_oy ~= foy then
+			g.flag_ox, g.flag_oy = fox, foy
+			flag.ImageRectOffset = Vector2.new(fox, foy)
+		end
+		local box, boy = B.x + frame * B.w, B.y
+		if g.banner_ox ~= box or g.banner_oy ~= boy then
+			g.banner_ox, g.banner_oy = box, boy
+			banner.ImageRectOffset = Vector2.new(box, boy)
+		end
+		if g.col ~= p.col then
+			g.col = p.col
+			banner.ImageColor3 = p.col
+		end
 		local fs = math.max(FxLayer.GOLD_MIN_PX, FxLayer.GOLD_SIZE / k * cam.scale)
 		-- GOLD_Y_OFFSET's 8 tiles scaled with the flag; its mound ends 0.42 of the sprite below its
 		-- centre, so the line never overlaps it when the minimum sizes apply
 		local gy = math.max(sw * FxLayer.GOLD_Y_OFFSET / FxLayer.FLAG_WORLD, sw * 0.42 + fs * 0.5)
 		local gold = g.gold
-		gold.Visible = true
-		gold.Text = p.text
-		gold.TextSize = math.min(fs, 100)
-		gold.Position = UDim2.fromOffset(x, y + gy)
-		gold.TextTransparency = t
-		g.stroke.Thickness = math.max(1.5, fs * 0.12)
-		g.stroke.Transparency = t
+		if g.text ~= p.text then
+			g.text = p.text
+			gold.Text = p.text
+		end
+		local ts = math.min(fs, 100)
+		if g.text_size ~= ts then
+			g.text_size = ts
+			gold.TextSize = ts
+		end
+		if g.gold_x ~= x or g.gold_y ~= y + gy then
+			g.gold_x, g.gold_y = x, y + gy
+			gold.Position = UDim2.fromOffset(x, y + gy)
+		end
+		if g.text_t ~= t then
+			g.text_t = t
+			gold.TextTransparency = t
+		end
+		local width = math.max(1.5, fs * 0.12)
+		if g.width ~= width then
+			g.width = width
+			g.stroke.Thickness = width
+		end
+		if g.stroke_t ~= t then
+			g.stroke_t = t
+			g.stroke.Transparency = t
+		end
 	end
+	truncate(list, keep)
 	for j = n + 1, #self._pop_gui do
 		local g = self._pop_gui[j]
-		if g.flag.Visible then
+		if g.vis then
+			g.vis = false
 			g.flag.Visible = false
 			g.banner.Visible = false
 			g.gold.Visible = false
@@ -614,12 +804,18 @@ local function pops_step(self: any, cam: any, now: number)
 end
 
 --- Draw a list of bursts (or debris) with its pool; a looping one runs until its `life`, fading.
-local function bursts_step(self: any, cam: any, now: number, list: { Burst }, pool: { ImageLabel }, z: number)
+local function bursts_step(self: any, cam: any, now: number, list: { Burst }, pool: { BurstGui }, z: number)
 	local st = self._state
 	local k = tonumber(st and st.map and st.map.k_lin) or Rules.K_LIN
 	local n = 0
-	local i = 1
-	while i <= #list do
+	local keep = 0
+	-- (MapCamera.map_to_screen and on_screen worked out here, the same sums: a nuke's debris are
+	-- hundreds of sprites, each projected every frame, and a phone runs Luau without native code)
+	local ax, ay = cam:anchor()
+	local sc, cu, cv = cam.scale, cam.cu, cam.cv
+	local vp = cam:viewport_size()
+	local vw, vh = vp.X, vp.Y
+	for i = 1, #list do
 		local b = list[i]
 		local row = b.row
 		local el = now - b.t0
@@ -627,7 +823,6 @@ local function bursts_step(self: any, cam: any, now: number, list: { Burst }, po
 		local a = 1.0
 		if b.life ~= nil then
 			if el >= b.life then
-				table.remove(list, i)
 				continue
 			end
 			if row.loop then
@@ -640,39 +835,77 @@ local function bursts_step(self: any, cam: any, now: number, list: { Burst }, po
 				a = (1 - t) / (1 - b.fade_out)
 			end
 		elseif frame >= row.frames then
-			table.remove(list, i)
 			continue
 		end
-		i += 1
-		local x, y = cam:map_to_screen(b.u, b.v)
-		local w = math.max(row.min_px, row.world / k * cam.scale)
-		if not cam:on_screen(x, y, w) then
+		keep += 1
+		list[keep] = b
+		local x, y = ax + (b.u - cu) * sc, ay + (b.v - cv) * sc
+		local w = math.max(row.min_px, row.world / k * sc)
+		if not (x >= -w and y >= -w and x <= vw + w and y <= vh + w) then
 			continue
 		end
 		n += 1
 		local g = pool[n]
 		if g == nil then
-			g = Instance.new("ImageLabel")
-			g.Name = "Explosion"
-			g.BackgroundTransparency = 1
-			g.AnchorPoint = Vector2.new(0.5, 0.5)
-			g.Image = MapFx.id
-			g.ResampleMode = Enum.ResamplerMode.Pixelated
-			g.ZIndex = z
-			g.Parent = self.root
+			local img = Instance.new("ImageLabel")
+			img.Name = "Explosion"
+			img.BackgroundTransparency = 1
+			img.AnchorPoint = Vector2.new(0.5, 0.5)
+			img.Image = MapFx.id
+			img.ResampleMode = Enum.ResamplerMode.Pixelated
+			img.ZIndex = z
+			img.Parent = self.root
+			g = {
+				img = img,
+				vis = true,
+				x = math.huge,
+				y = math.huge,
+				w = -1,
+				h = -1,
+				rw = -1,
+				rh = -1,
+				ox = -1,
+				oy = -1,
+				img_t = -1,
+			}
 			pool[n] = g
 		end
-		g.Visible = true
-		g.Position = UDim2.fromOffset(x, y)
-		g.Size = UDim2.fromOffset(w, w * row.h / row.w)
-		g.ImageRectSize = Vector2.new(row.w, row.h)
-		g.ImageRectOffset = Vector2.new((row.x or 0) + frame * row.w, row.y)
-		g.ImageTransparency = 1 - a
+		-- (debris sit still between their frames, full strength mid-life: mostly nothing to write)
+		local img = g.img
+		if not g.vis then
+			g.vis = true
+			img.Visible = true
+		end
+		if g.x ~= x or g.y ~= y then
+			g.x, g.y = x, y
+			img.Position = UDim2.fromOffset(x, y)
+		end
+		local h = w * row.h / row.w
+		if g.w ~= w or g.h ~= h then
+			g.w, g.h = w, h
+			img.Size = UDim2.fromOffset(w, h)
+		end
+		if g.rw ~= row.w or g.rh ~= row.h then
+			g.rw, g.rh = row.w, row.h
+			img.ImageRectSize = Vector2.new(row.w, row.h)
+		end
+		local ox, oy = (row.x or 0) + frame * row.w, row.y
+		if g.ox ~= ox or g.oy ~= oy then
+			g.ox, g.oy = ox, oy
+			img.ImageRectOffset = Vector2.new(ox, oy)
+		end
+		local img_t = 1 - a
+		if g.img_t ~= img_t then
+			g.img_t = img_t
+			img.ImageTransparency = img_t
+		end
 	end
+	truncate(list, keep)
 	for j = n + 1, #pool do
 		local g = pool[j]
-		if g.Visible then
-			g.Visible = false
+		if g.vis then
+			g.vis = false
+			g.img.Visible = false
 		end
 	end
 end
@@ -681,15 +914,16 @@ function FxLayer.tick(self: any, _dt: number)
 	local cam = self.view.rig
 	local now = FrameClock.now()
 	local n = 0
-	local i = 1
-	while i <= #self._fx do
-		local fx = self._fx[i]
+	local list = self._fx
+	local keep = 0
+	for i = 1, #list do
+		local fx = list[i]
 		local t = (now - fx.t0) / fx.dur
 		if t >= 1 then
-			table.remove(self._fx, i)
 			continue
 		end
-		i += 1
+		keep += 1
+		list[keep] = fx
 		local x, y = cam:map_to_screen(fx.u, fx.v)
 		local e = 1 - (1 - t) ^ 3
 		local r = (fx.r0 + (fx.r1 - fx.r0) * e) * cam.scale
@@ -697,9 +931,9 @@ function FxLayer.tick(self: any, _dt: number)
 			continue
 		end
 		n += 1
-		local f = self._frames[n]
-		if f == nil then
-			f = Instance.new("Frame")
+		local g = self._frames[n]
+		if g == nil then
+			local f = Instance.new("Frame")
 			f.Name = "Fx"
 			f.AnchorPoint = Vector2.new(0.5, 0.5)
 			f.BorderSizePixel = 0
@@ -707,26 +941,68 @@ function FxLayer.tick(self: any, _dt: number)
 			local c = Instance.new("UICorner")
 			c.CornerRadius = UDim.new(0.5, 0)
 			c.Parent = f
+			-- (kept with the frame: it was looked up among the frame's children every frame)
 			local s = Instance.new("UIStroke")
 			s.Parent = f
 			f.Parent = self.root
-			self._frames[n] = f
+			g = {
+				frame = f,
+				stroke = s,
+				vis = true,
+				x = math.huge,
+				y = math.huge,
+				d = -1,
+				col = nil,
+				fill_t = -1,
+				stroke_col = nil,
+				width = -1,
+				stroke_t = -1,
+			}
+			self._frames[n] = g
 		end
-		f.Visible = true
-		f.Position = UDim2.fromOffset(x, y)
-		f.Size = UDim2.fromOffset(r * 2, r * 2)
-		f.BackgroundColor3 = fx.col
+		local f, s = g.frame, g.stroke
+		if not g.vis then
+			g.vis = true
+			f.Visible = true
+		end
+		if g.x ~= x or g.y ~= y then
+			g.x, g.y = x, y
+			f.Position = UDim2.fromOffset(x, y)
+		end
+		if g.d ~= r * 2 then
+			g.d = r * 2
+			f.Size = UDim2.fromOffset(r * 2, r * 2)
+		end
+		if g.col ~= fx.col then
+			g.col = fx.col
+			f.BackgroundColor3 = fx.col
+		end
 		-- the flash fills the disc early on; the ring stays
-		f.BackgroundTransparency = if fx.flash then math.clamp(0.25 + t * 3, 0, 1) else 0.8 + 0.2 * t
-		local s = f:FindFirstChildOfClass("UIStroke") :: UIStroke
-		s.Color = fx.col
-		s.Thickness = math.max(1.5, r * 0.04)
-		s.Transparency = t
+		local fill_t = if fx.flash then math.clamp(0.25 + t * 3, 0, 1) else 0.8 + 0.2 * t
+		if g.fill_t ~= fill_t then
+			g.fill_t = fill_t
+			f.BackgroundTransparency = fill_t
+		end
+		if g.stroke_col ~= fx.col then
+			g.stroke_col = fx.col
+			s.Color = fx.col
+		end
+		local width = math.max(1.5, r * 0.04)
+		if g.width ~= width then
+			g.width = width
+			s.Thickness = width
+		end
+		if g.stroke_t ~= t then
+			g.stroke_t = t
+			s.Transparency = t
+		end
 	end
+	truncate(list, keep)
 	for j = n + 1, #self._frames do
-		local f = self._frames[j]
-		if f.Visible then
-			f.Visible = false
+		local g = self._frames[j]
+		if g.vis then
+			g.vis = false
+			g.frame.Visible = false
 		end
 	end
 	pops_step(self, cam, now)

@@ -41,6 +41,9 @@ Telemetry.SLOW_STALL_S = 2.0
 --- render CPU time (Stats.RenderGPUFrameTime / RenderCPUFrameTime, averaged over the window), the
 --- bigger one when it is SLOW_ENGINE_SHARE of the frame or more, or neither.
 Telemetry.SLOW_NUKES = 40
+--- The map's parts besides units, labels and territory (MapView.perf_stats keys), each its own cause
+--- "map_<part>"; "map" is what none of them holds.
+Telemetry.MAP_PARTS = { "camera", "glow", "roads", "ranges", "structures", "fx", "fronts", "markers", "input" }
 Telemetry.SLOW_SCRIPT_SHARE = 0.5
 Telemetry.SLOW_ENGINE_SHARE = 1 / 3
 
@@ -52,6 +55,10 @@ function Telemetry.new(ctx: any)
 	self._match = nil
 	self._title_sent = false
 	self._title_wanted = false
+	--- matches reported started this session, and the matches counted before it (nil: the saved
+	--- [stats] section's); matches_before() is what the server counts
+	self.matches_started = 0
+	self.matches_base = nil :: number?
 	--- frame rate over the current state window
 	self._frames = 0
 	self._frame_time = 0.0
@@ -131,13 +138,25 @@ function Telemetry.slow_cause(s: any): string
 		{ "units", units },
 		{ "labels", labels },
 		{ "territory", territory },
-		{ "map", math.max(ms(map.total) - units - labels - territory, 0) },
+	}
+	-- the rest of the map by its own parts (2026-10-27: the rest as one was half of all slow frames,
+	-- 70% of them on phones), and what none of them holds
+	local rest = ms(map.total) - units - labels - territory
+	for _, k in Telemetry.MAP_PARTS do
+		local v = ms(map[k])
+		table.insert(parts, { "map_" .. k, v })
+		rest -= v
+	end
+	for _, part in {
+		{ "map", math.max(rest, 0) },
 		{ "hud", ms(s.hud_ms) },
 		{ "sim", ms(s.sim_ms) },
 		{ "net", ms(s.net_ms) },
 		{ "session", ms(s.session_ms) },
 		{ "ui", ms(s.ui_ms) },
-	}
+	} do
+		table.insert(parts, part)
+	end
 	local total, top = 0.0, parts[1]
 	for _, part in parts do
 		total += part[2]
@@ -317,6 +336,28 @@ function Telemetry._open(self): any
 	return nil
 end
 
+--- The player's matches before the one being played (before the next one, between matches): the
+--- server's count when this session began (the saved [stats] section) and the matches started since.
+function Telemetry.matches_before(self): number
+	local base = self.matches_base
+	if base == nil then
+		local s = self.ctx.session
+		local stats = if s ~= nil and type(s.load_settings) == "function" then s:load_settings("stats") else nil
+		base = if type(stats) == "table" then tonumber(stats.matches) or 0 else 0
+	end
+	local n = self.matches_started
+	if self:_open() ~= nil and n > 0 then
+		n -= 1
+	end
+	return (base :: number) + n
+end
+
+--- "Replay as new player": no match counted again.
+function Telemetry.new_player(self)
+	self.matches_base = 0
+	self.matches_started = 0
+end
+
 function Telemetry.title_shown(self)
 	self._title_wanted = true
 	if not self._title_sent then
@@ -437,6 +478,7 @@ function Telemetry.tick(self)
 				state_at = -math.huge,
 			}
 			self._match = m
+			self.matches_started += 1
 			self:_send("match_start", mode, tostring(st.map_id or ""))
 		end
 	end

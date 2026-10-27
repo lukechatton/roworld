@@ -209,6 +209,9 @@ function MapView.new(): MapView
 	self._spawn_ring = ring(overlay, "SpawnPreview", 6)
 	self._aim_ring = ring(overlay, "AimOuter", 7)
 	self._aim_inner = ring(overlay, "AimInner", 8)
+	--- marker frame -> whether it shows, and its UIStroke (kept here: markers_step runs every frame)
+	self._marker_on = {} :: { [Frame]: boolean }
+	self._marker_stroke = {} :: { [Frame]: UIStroke? }
 
 	local MapInput = optional(script.Parent, "MapInput")
 	self.input = if MapInput then MapInput.new(self, self.rig) else nil
@@ -364,7 +367,9 @@ function MapView.bind_state(self: any, state: any)
 	end)
 	self:_connect(state.cosmetics_changed, function(ids)
 		surface:on_cosmetics_changed(ids)
-		call(self.layers.names, "on_cosmetics_changed", ids)
+		-- (the NameLayer is `labels`, not `names`; it reads the cosmetics as it draws and has no
+		-- handler of its own yet, 2026-10-26)
+		call(self.layers.labels, "on_cosmetics_changed", ids)
 	end)
 	self:_connect(state.alliance_changed, function(a, b, _formed, _traitor)
 		surface:refresh_palette()
@@ -665,7 +670,6 @@ function MapView.set_aim(
 	if kind == "" or tile < 0 or tile >= N then
 		self._aim = nil
 		call(self.layers.ranges, "set_aim", "", -1, "")
-		call(self.layers.icons, "set_aim", "", -1)
 		return
 	end
 	local inner = -1.0
@@ -687,7 +691,6 @@ function MapView.set_aim(
 	end
 	self._aim = { kind = kind, tile = tile, inner = inner, outer = math.max(outer, 0.5), valid = valid ~= false }
 	call(self.layers.ranges, "set_aim", kind, tile, d, level or 1)
-	call(self.layers.icons, "set_aim", kind, tile, Color3.new(1, 1, 1))
 end
 
 function MapView.aim_sams(self: any): number
@@ -785,7 +788,8 @@ function MapView._on_unit_removed(self: any, uid: number, reason: number)
 	end
 end
 
---- The selected warship's patrol / targeting rings follow it.
+--- The selected warship's patrol / targeting rings follow it (plain numbers: every frame a warship
+--- is selected, 2026-10-26).
 function MapView._update_selected_rings(self: any)
 	local st = self._state
 	local VR = self.view_rules
@@ -803,14 +807,15 @@ function MapView._update_selected_rings(self: any)
 		then u.patrol_tile
 		elseif u.path and #u.path > 0 then u.path[1]
 		else -1
-	local pc = if patrol >= 0 then Vector2.new(patrol % W + 0.5, patrol // W + 0.5) else Vector2.zero
 	local x, y = units.unit_uv(st, u, st.render_tick or st.tick)
 	call(
 		self.layers.ranges,
 		"set_unit_rings",
-		pc,
+		if patrol >= 0 then patrol % W + 0.5 else 0.0,
+		if patrol >= 0 then patrol // W + 0.5 else 0.0,
 		if patrol >= 0 then VR.warship_patrol_range() else 0.0,
-		Vector2.new(x, y),
+		x,
+		y,
 		VR.warship_target_range(),
 		st:owner_color(u.owner)
 	)
@@ -820,6 +825,21 @@ end
 -- Frame
 -- ---------------------------------------------------------------------------------------------
 
+local WHITE = Color3.new(1, 1, 1)
+local AIM_COVERED = Color3.new(1.0, 0.16, 0.12)
+local AIM_NUKE = Color3.new(1.0, 0.84, 0.46)
+local AIM_BOAT = Color3.new(0.55, 0.85, 1.0)
+local AIM_INVALID = Color3.new(0.6, 0.6, 0.6)
+
+--- A marker shown or hidden, its Visible written only when that changes (all three were written
+--- hidden every frame of every match, 2026-10-26).
+local function show_marker(self: any, f: Frame, on: boolean)
+	if self._marker_on[f] ~= on then
+		self._marker_on[f] = on
+		f.Visible = on
+	end
+end
+
 local function place_disk(self: any, f: Frame, tile: number, radius_tiles: number, col: Color3, fill_t: number)
 	local x, y = self.rig:tile_to_screen(tile)
 	local d = math.max(radius_tiles * 2.0 * self.rig.scale, 6.0)
@@ -827,11 +847,15 @@ local function place_disk(self: any, f: Frame, tile: number, radius_tiles: numbe
 	f.Size = UDim2.fromOffset(d, d)
 	f.BackgroundColor3 = col
 	f.BackgroundTransparency = fill_t
-	local s = f:FindFirstChildOfClass("UIStroke")
+	local s = self._marker_stroke[f]
+	if s == nil then
+		s = f:FindFirstChildOfClass("UIStroke")
+		self._marker_stroke[f] = s
+	end
 	if s then
 		s.Color = col
 	end
-	f.Visible = true
+	show_marker(self, f, true)
 end
 
 local function markers_step(self: any, now: number)
@@ -844,37 +868,37 @@ local function markers_step(self: any, now: number)
 	if spawn >= 0 then
 		-- a ring breathing between SPAWN_MIN_RAD and SPAWN_MAX_RAD
 		-- (full-size tiles) around the local spawn, at a phase speed of 0.008 per ms
-		local col = Color3.new(1, 1, 1)
+		local col = WHITE
 		if st.local_owner ~= 0 then
-			col = st:owner_color(st.local_owner):Lerp(Color3.new(1, 1, 1), 0.35)
+			col = st:owner_color(st.local_owner):Lerp(WHITE, 0.35)
 		end
 		local k = tonumber(st.map and st.map.k_lin) or Rules.K_LIN
 		local b = 0.5 + 0.5 * math.sin(now * 8.0)
 		local r = (MapView.SPAWN_MIN_RAD + (MapView.SPAWN_MAX_RAD - MapView.SPAWN_MIN_RAD) * b) / k
 		place_disk(self, self._spawn_ring, spawn, r, col, 0.9)
 	else
-		self._spawn_ring.Visible = false
+		show_marker(self, self._spawn_ring, false)
 	end
 	local aim = self._aim
 	if aim ~= nil then
-		local col = Color3.new(1, 1, 1)
+		local col = WHITE
 		if aim.kind == "nuke" then
-			col = if self:aim_sams() > 0 then Color3.new(1.0, 0.16, 0.12) else Color3.new(1.0, 0.84, 0.46)
+			col = if self:aim_sams() > 0 then AIM_COVERED else AIM_NUKE
 		elseif aim.kind == "boat" then
-			col = Color3.new(0.55, 0.85, 1.0)
+			col = AIM_BOAT
 		end
 		if not aim.valid then
-			col = Color3.new(0.6, 0.6, 0.6)
+			col = AIM_INVALID
 		end
 		place_disk(self, self._aim_ring, aim.tile, aim.outer, col, 0.8)
 		if aim.inner > 0 then
 			place_disk(self, self._aim_inner, aim.tile, aim.inner, col, 0.7)
 		else
-			self._aim_inner.Visible = false
+			show_marker(self, self._aim_inner, false)
 		end
 	else
-		self._aim_ring.Visible = false
-		self._aim_inner.Visible = false
+		show_marker(self, self._aim_ring, false)
+		show_marker(self, self._aim_inner, false)
 	end
 end
 
@@ -882,7 +906,6 @@ local function local_owner_step(self: any, st: any)
 	if st.local_owner ~= self._last_local then
 		self._last_local = st.local_owner
 		self.surface:refresh_palette()
-		call(self.layers.icons, "mark_markers_dirty")
 	end
 end
 
@@ -911,16 +934,20 @@ function MapView.update(self: any, dt: number)
 	local t2 = clock()
 	guard("markers", markers_step, self, t0)
 	guard("selected_rings", self._update_selected_rings, self)
+	self:_perf_add("markers", clock() - t2)
 	for _, name in self._layer_order do
 		local lt = clock()
 		call(self.layers[name], "tick", dt)
 		self:_perf_add(name, clock() - lt)
 	end
-	call(self.input, "tick", dt)
 	local t3 = clock()
+	call(self.input, "tick", dt)
+	local t4 = clock()
+	-- (with the layers', markers and input, every part of the frame's map time has a key)
+	self:_perf_add("input", t4 - t3)
 	self:_perf_add("camera", t1 - t0)
 	self:_perf_add("territory", t2 - t1)
-	self:_perf_add("total", t3 - t0)
+	self:_perf_add("total", t4 - t0)
 end
 
 function MapView._perf_add(self: any, key: string, sec: number)

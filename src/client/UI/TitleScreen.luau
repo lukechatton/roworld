@@ -364,6 +364,8 @@ function TitleScreen.new(c: any)
 	--- the starter pack's button (under the pair, while its offer runs): UIRoot opens the offer
 	self.open_starter = Signal.new()
 	self.open_shop = Signal.new()
+	--- RoWorld General's button (Data/Subscription): UIRoot opens its window
+	self.open_general = Signal.new()
 	--- (action, user_id?) the party panel (Session.party_action)
 	self.party_action = Signal.new()
 	self.difficulty =
@@ -430,6 +432,16 @@ function TitleScreen.new(c: any)
 		self.open_starter:Fire()
 	end)
 	self:add_child(self._starter_btn)
+	-- and RoWorld General's (Data/Subscription; 2026-10-27), once the subscription exists
+	self._general_btn = UITheme.button("ROWORLD GENERAL", "GlassButton", "star", 40.0)
+	self._general_btn:set_font_size(13)
+	self._general_btn:add_theme_color_override("font_color", UITheme.GOLD)
+	self._general_btn:add_theme_color_override("icon_color", UITheme.GOLD)
+	self._general_btn.pressed:Connect(function()
+		self.open_general:Fire()
+	end)
+	self._general_btn:set_visible(UICtx.data("Subscription").id() ~= "")
+	self:add_child(self._general_btn)
 	-- the party (team games on: staging only for now; hidden until the server sends one)
 	self._party = PartyPanel.new(c)
 	self._party.on_action = function(action: string, uid: number?)
@@ -994,11 +1006,32 @@ function TitleScreen._place_crate_button(self, compact: boolean, head_top: numbe
 	local stop = if shb.visible then shtop + shsz.Y + (if compact then 8.0 else 14.0) else shtop
 	sb:set_anchors(0, 0, 0, 0)
 	sb:set_offsets(right - ssz.X, stop, right, stop + ssz.Y)
+	-- RoWorld General's under them all
+	local gb = self._general_btn
+	gb:set_font_size(if compact then 11 else 13)
+	local gsz = gb:get_combined_minimum_size()
+	local gw = math.max(gsz.X, if compact then 150.0 else 200.0)
+	local gh = if compact then 32.0 else 40.0
+	local below = if sb.visible then stop + ssz.Y else (if shb.visible then shtop + shsz.Y else top + size.Y)
+	local gtop = below + (if compact then 8.0 else 14.0)
+	gb:set_anchors(0, 0, 0, 0)
+	gb:set_offsets(right - gw, gtop, right, gtop + gh)
+end
+
+--- RoWorld General's button says whether the player is one (Session.general).
+function TitleScreen.refresh_general(self)
+	local s = self.ctx.session
+	local on = s ~= nil and s.general == true
+	self._general_btn:set_text(if on then "GENERAL" else "ROWORLD GENERAL")
+	self:_refresh_greeting()
 end
 
 function TitleScreen._refresh_greeting(self)
 	local n = self.ctx:username()
-	local text = if n ~= "Commander" and n ~= "" then ("Welcome, Commander " .. n) else "Welcome, Commander"
+	-- (a RoWorld General is greeted as one: Data/Subscription)
+	local s0 = self.ctx.session
+	local rank = if s0 ~= nil and s0.general == true then "General" else "Commander"
+	local text = if n ~= "Commander" and n ~= "" then ("Welcome, " .. rank .. " " .. n) else ("Welcome, " .. rank)
 	-- game admins (the server told this client which players are bots): say so, so it's easy to check
 	local s = self.ctx.session
 	if s ~= nil and s.admin_bots ~= nil then

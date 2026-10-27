@@ -373,7 +373,13 @@ function Tutorial._process(self, delta: number)
 	local o = ctx:my()
 	local any, on_owner, on_land = self:_orders()
 	self._step_t += delta
-	if ctx.troop_floor == nil and o ~= nil and (o.max_troops or 0) > 0 and o.troops >= Data.FLOOR_ARM * o.max_troops then
+	if
+		ctx.troop_floor == nil
+		and i >= (Data.step_index(Data.FLOOR_FROM) or 1)
+		and o ~= nil
+		and (o.max_troops or 0) > 0
+		and o.troops >= Data.FLOOR_ARM * o.max_troops
+	then
 		ctx.troop_floor = Data.TROOP_FLOOR
 	end
 	if not self._started and self._step_t > 1.0 then
@@ -440,6 +446,9 @@ function Tutorial._process(self, delta: number)
 				end
 			end
 			self:_say(i, if self._neighbour ~= nil then s:owner_name(self._neighbour) else nil)
+			if id == "grow" then
+				self._text:set_text(Data.grow_line(Data.GROW_TAPS, ctx.touch))
+			end
 		end
 		if id == "expand" then
 			if any then
@@ -450,6 +459,7 @@ function Tutorial._process(self, delta: number)
 		elseif id == "grow" then
 			if any then
 				self._taps += 1
+				self._text:set_text(Data.grow_line(Data.GROW_TAPS - self._taps, ctx.touch))
 			end
 			local land = math.clamp((o.tiles - self._base) / math.max(self._goal - self._base, 1), 0, 1)
 			local taps = math.min(self._taps / Data.GROW_TAPS, 1)
@@ -458,7 +468,7 @@ function Tutorial._process(self, delta: number)
 				self:_advance()
 				return
 			end
-			if self._idle > Data.NUDGE_S then
+			if self._taps == 0 or self._idle > Data.NUDGE_S then
 				point = ui.advisor:frontier_point()
 			end
 		elseif id == "ratio" then

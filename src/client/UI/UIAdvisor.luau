@@ -175,6 +175,42 @@ function UIAdvisor.check_tips(self: any)
 	end
 end
 
+--- A new player's floor under the army outside the tutorial (which keeps its own while it runs):
+--- in the player's first Data/Tutorial.ROOKIE_MATCHES matches an order leaves ROOKIE_FLOOR of the
+--- army's cap at home, from the first time the army reaches FLOOR_ARM of it (UICtx.troop_floor;
+--- UIRoot clears it for every new match).
+function UIAdvisor.check_floor(self: any)
+	local ui = self.ui
+	local ctx = self.ctx
+	if ctx.troop_floor ~= nil or (ui.tutorial ~= nil and ui.tutorial.active) or not ctx:alive_player() then
+		return
+	end
+	local o = ctx:my()
+	local Tut = UICtx.data("Tutorial")
+	if o == nil or not Tut.rookie(ui.telemetry:matches_before()) then
+		return
+	end
+	if (o.max_troops or 0) > 0 and (o.troops or 0) >= Tut.FLOOR_ARM * o.max_troops then
+		ctx.troop_floor = Tut.ROOKIE_FLOOR
+	end
+end
+
+--- The floor held an order back (UICtx.floor_held): the first time in a match, and then at most
+--- once a minute, a tip on the Attack bar says why (the tutorial's card does while it runs).
+function UIAdvisor.on_floor_held(self: any)
+	local ui = self.ui
+	if (ui.tutorial ~= nil and ui.tutorial.active) or not self:cooldown("floor", 60000) then
+		return
+	end
+	ui.coach:offer("floor", function()
+		local sl = ui.bar._slider
+		if sl ~= nil and sl:is_visible_in_tree() then
+			return UICtx.rect_center(sl:get_global_rect())
+		end
+		return Vector2.new(-1, -1)
+	end)
+end
+
 --- Screen point of a neutral tile on our frontier (for the "expand" tip), or (-1, -1).
 function UIAdvisor.frontier_point(self: any): Vector2
 	local ctx = self.ctx

@@ -115,6 +115,8 @@ Protocol.OP = {
 	-- info: { map, map_name }?) asking / waiting in line for a free seat / seated, on the way / neither
 	STARTER_SEEN = 41, -- client → server: the starter pack's offer is on my screen: start its clock (once;
 	-- server/Purchases.starter_seen; the INVENTORY that follows carries `starter`)
+	GENERAL = 42, -- server → client: ({ on: boolean, given: { crate: boolean?, stars: number?, skin: string? }? })
+	-- RoWorld General (Data/Subscription; server/General): subscribed or not, and what it just gave
 }
 
 Protocol.INTENT_TYPES = {

@@ -35,7 +35,9 @@
 --     Slow Frames (value: the frame rate; CustomField02 = what the frame was made of, CustomField03 =
 --       how far into the match): once a match, the first 10 s a client spends under 12 frames a second
 --       with the game's window in front (Telemetry "slow"). Causes: Munitions In Flight (40 or more) ·
---       Script - Units / Labels / Territory / Map Other (the map's layers) / Updates (the server's
+--       Script - Units / Labels / Territory / Map Camera / Fallout Glow / Roads / Range Rings /
+--       Structures / Map Effects / Fronts / Markers / Map Input / Map Other (the map's layers; until
+--       v110 the ones after Territory were all Map Other) / Updates (the server's
 --       updates decoded and applied: a public match) / Sim (a solo match's) / Session / HUD / HUD Kit
 --       (our own code is half the frame or more; the biggest part) · Engine - GPU / Render CPU (it is
 --       not, and the engine's own count of that is a third of the frame or more) · Engine - Other.
@@ -90,6 +92,16 @@ Analytics.SLOW_CAUSES = {
 	labels = "Script - Labels",
 	territory = "Script - Territory",
 	map = "Script - Map Other",
+	-- (2026-10-27: the rest of the map by its parts, Telemetry.MAP_PARTS)
+	map_camera = "Script - Map Camera",
+	map_glow = "Script - Fallout Glow",
+	map_roads = "Script - Roads",
+	map_ranges = "Script - Range Rings",
+	map_structures = "Script - Structures",
+	map_fx = "Script - Map Effects",
+	map_fronts = "Script - Fronts",
+	map_markers = "Script - Markers",
+	map_input = "Script - Map Input",
 	hud = "Script - HUD Kit",
 	sim = "Script - Sim",
 	net = "Script - Updates",
@@ -372,6 +384,7 @@ end
 --- "left" (minutes) · "help" (where) · "spectate" ·
 --- "takeover_offer" · "takeover_click" (client) · "credit_bought" / "credit_used" (kind; the server) ·
 --- "starter" ("shown" / "bought": the server; "opened" / "clicked": the client) ·
+--- "general" ("opened" (where) / "clicked" / "prompt_done": the client; "subscribed": the server) ·
 --- "flag_shop" ("opened" / "clicked" <key> / "clicked_pack" <set>: the client; "bought" <key> <Robux
 --- spent> / "bought_pack" <set> <Robux spent>: the server).
 function Analytics.report(player: any, kind: any, a: any, b: any, c: any)
@@ -591,6 +604,15 @@ function Analytics.report(player: any, kind: any, a: any, b: any, c: any)
 		local action = if type(a) == "string" then names[a] else nil
 		if action ~= nil then
 			custom(player, "Starter Pack", 1, nil, action)
+		end
+	elseif kind == "general" then
+		-- RoWorld General (Data/Subscription; 2026-10-27): "opened" (client: its window; b = where from),
+		-- "clicked" (client: SUBSCRIBE pressed), "prompt_done" (client: Roblox's prompt closed after a
+		-- try to buy), "subscribed" (the server: Roblox says so, server/General)
+		local names = { opened = "Opened", clicked = "Clicked", prompt_done = "Prompt Done", subscribed = "Subscribed" }
+		local action = if type(a) == "string" then names[a] else nil
+		if action ~= nil then
+			custom(player, "General", 1, nil, action)
 		end
 	elseif kind == "flag_shop" then
 		-- the flag shop (Data/Shop): "Flag Shop" Opened (client, once per visit) / Clicked (client, a

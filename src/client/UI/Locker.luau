@@ -375,6 +375,15 @@ function Locker._build_crate(self, parent: any)
 		self:_buy_pressed(Products.crate3)
 	end)
 	v:add_child(self._buy3)
+	-- and ten (Data/Products crate10; 2026-10-27)
+	self._buy10 = UITheme.button("", "GlassButton", "robux", 42.0)
+	self._buy10:set_min_size(Vector2.new(Locker.CRATE_W - 32, 42))
+	self._buy10:set_font_size(13)
+	self._buy10:set_visible(false)
+	self._buy10.pressed:Connect(function()
+		self:_buy_pressed(Products.crate10)
+	end)
+	v:add_child(self._buy10)
 	self._note = UITheme.label("", 11, 500, UITheme.TEXT_3)
 	self._note:set_alignment(W.ALIGN_CENTER)
 	self._note:set_autowrap(true)
@@ -409,16 +418,17 @@ function Locker._price(self): number
 	return Prices.robux(if self:_product() == Products.crate_first then "crate_first" else "crate")
 end
 
---- The 3-crate pack's Robux saved against three crates at Roblox's price for this player; nil when
---- it isn't offered: not created here, not cheaper (Managed Pricing moves each price on its own), or
---- fewer than its crates' worth of items left to find (a crate never gives a duplicate).
-function Locker._pack_saving(self, left: number): number?
-	local p = Products.crate3
+--- A crate pack's (`key`: "crate3", "crate10") Robux saved against its crates one by one at Roblox's
+--- price for this player; nil when it isn't offered: not created here, not cheaper (Managed Pricing
+--- moves each price on its own), or fewer than its crates' worth of items left to find (a crate never
+--- gives a duplicate).
+function Locker._pack_saving(self, left: number, key: string): number?
+	local p = Products[key]
 	if p == nil or p.id == 0 then
 		return nil
 	end
 	local n = math.max(1, tonumber(p.count) or 3)
-	local save = n * Prices.robux("crate") - Prices.robux("crate3")
+	local save = n * Prices.robux("crate") - Prices.robux(key)
 	if save <= 0 or left - self:_crates() < n then
 		return nil
 	end
@@ -444,11 +454,20 @@ function Locker._refresh_crate(self)
 	self._buy:set_visible(allowed and not all_owned)
 	self._odds_box:set_visible(allowed and not all_owned)
 	self._buy:set_disabled(busy)
-	local save = if allowed and not busy and waiting <= 0 then self:_pack_saving(total - owned) else nil
+	local packs = allowed and not busy and waiting <= 0
+	local save = if packs then self:_pack_saving(total - owned, "crate3") else nil
+	local save10 = if packs then self:_pack_saving(total - owned, "crate10") else nil
 	self._buy3:set_visible(save ~= nil and (self._tight or 0) < 2)
 	if save ~= nil then
 		self._buy3:set_text(string.format("%d  ·  %d CRATES", Prices.robux("crate3"), Products.crate3.count or 3))
 	end
+	self._buy10:set_visible(save10 ~= nil and (self._tight or 0) < 3)
+	if save10 ~= nil then
+		self._buy10:set_text(string.format("%d  ·  %d CRATES", Prices.robux("crate10"), Products.crate10.count or 10))
+	end
+	-- (the note names the bigger saving)
+	local pack_n = if save10 ~= nil then Products.crate10.count or 10 else Products.crate3.count or 3
+	save = save10 or save
 	if busy then
 		self._buy:set_icon("")
 		self._buy:set_text("OPENING…")
@@ -469,8 +488,8 @@ function Locker._refresh_crate(self)
 		-- (phones: one line; the crate card is all the height a phone has)
 		self._note:set_text(
 			if self.ctx.compact
-				then string.format("%d crates save %d", Products.crate3.count or 3, save)
-				else string.format("%d crates save %d  ·  Never a duplicate", Products.crate3.count or 3, save)
+				then string.format("%d crates save %d", pack_n, save)
+				else string.format("%d crates save %d  ·  Never a duplicate", pack_n, save)
 		)
 	else
 		self._note:set_text("Never a duplicate")
@@ -786,12 +805,18 @@ function Locker._rebuild(self)
 			table.insert(list, it)
 		end
 	end
+	-- (a General skin once given: Data/Subscription)
+	for _, it in Cosmetics.generals() do
+		if it.kind == slot and inv.owned[it.id] == true then
+			table.insert(list, it)
+		end
+	end
 	for _, it in Cosmetics.shop_items() do
 		if it.kind == slot and inv.owned[it.id] == true then
 			table.insert(list, it)
 		end
 	end
-	local rank = { exclusive = 0, legendary = 1, epic = 2, rare = 3, common = 4 }
+	local rank = { exclusive = 0, general = 0, legendary = 1, epic = 2, rare = 3, common = 4 }
 	table.sort(list, function(a, b)
 		local oa, ob = inv.owned[a.id] == true, inv.owned[b.id] == true
 		if oa ~= ob then
@@ -885,12 +910,14 @@ function Locker.apply_layout(self)
 	self._buy:set_min_size(Vector2.new(cw - 32, if compact then 40 else 48))
 	self._buy3:set_min_size(Vector2.new(cw - 32, if compact then 34 else 42))
 	self._buy3:set_font_size(if compact then 12 else 13)
+	self._buy10:set_min_size(Vector2.new(cw - 32, if compact then 34 else 42))
+	self._buy10:set_font_size(if compact then 12 else 13)
 	self._crate_v:set_separation(if compact then 5 else 8)
 	local gw = math.clamp(area.Width - cw - 110, 300, Locker.GRID_SIZE.X)
 	local gh = math.clamp(area.Height - (if compact then 120 else 170), 120, Locker.GRID_SIZE.Y)
 	self._host:set_min_size(Vector2.new(gw, gh))
 	-- still taller than the screen (a short phone): the grid gives up what it can, then the card its
-	-- note (the price is on the button), then the 3-crate button
+	-- note (the price is on the button), then the 3-crate button, then the 10-crate one
 	self._tight = 0
 	self._note:set_visible(true)
 	if self.is_open then
@@ -909,6 +936,10 @@ function Locker.apply_layout(self)
 	if compact and over() > 0 then
 		self._tight = 2
 		self._buy3:set_visible(false)
+	end
+	if compact and over() > 0 then
+		self._tight = 3
+		self._buy10:set_visible(false)
 	end
 	if self.is_open then
 		self:_refresh_crate()

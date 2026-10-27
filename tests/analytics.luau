@@ -465,6 +465,13 @@ do
 	expect(cause({ frame_ms = 300, map = { total = 200, units = 160, labels = 20 } }) == "units", "units")
 	expect(cause({ frame_ms = 300, map = { total = 200, units = 10, labels = 10, territory = 150 } }) == "territory", "territory")
 	expect(cause({ frame_ms = 300, map = { total = 200, units = 10, labels = 10, territory = 10 } }) == "map", "the rest of the map")
+	expect(cause({ frame_ms = 300, map = { total = 200, units = 10, territory = 10, structures = 120, fx = 40 } }) == "map_structures", "the rest of the map by its parts: structures")
+	expect(cause({ frame_ms = 300, map = { total = 200, ranges = 30, glow = 25, camera = 5 } }) == "map", "what no part holds is still the rest")
+	for _, k in Telemetry.MAP_PARTS do
+		local t = { frame_ms = 300, map = { total = 200 } }
+		t.map[k] = 190
+		expect(cause(t) == "map_" .. k, "  map part " .. k)
+	end
 	expect(cause({ frame_ms = 300, map = { total = 20 }, hud_ms = 180 }) == "hud", "the HUD")
 	expect(cause({ frame_ms = 300, map = { total = 20 }, hud_ms = 5, sim_ms = 190 }) == "sim", "the local Sim")
 	expect(cause({ frame_ms = 300, map = { total = 20 }, net_ms = 170, sim_ms = 0 }) == "net", "the server's updates (a public match)")

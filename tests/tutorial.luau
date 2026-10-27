@@ -62,10 +62,14 @@ do
 	-- every order passes UICtx.send: there the floor holds whoever built the order
 	me.troops, me.max_troops = 6000, 20000
 	local sent = {}
+	local held = 0
 	local sender = {
 		ratio = 0.4,
 		troop_floor = 0.25,
 		floor_share = UICtx.floor_share,
+		floor_held = { Fire = function()
+			held += 1
+		end },
 		my = c.my,
 		sent_log = {},
 		session = { send_intent = function(_, it)
@@ -74,11 +78,72 @@ do
 	}
 	UICtx.send(sender, { type = "attack", tile = 1, ratio = 1.0 })
 	expect(#sent == 1 and math.abs(sent[1].ratio - 1000 / 6000) < 1e-9, "an order for everything is held to what may go")
+	expect(held == 1, "and the floor says it held one back")
 	me.troops = 4000
 	UICtx.send(sender, { type = "attack", tile = 1, ratio = 0.5 })
 	expect(#sent == 1 and #sender.sent_log == 1, "below the floor it is not sent")
+	expect(held == 2, "nor that one")
 	UICtx.send(sender, { type = "build", kind = "city", tile = 1 })
-	expect(#sent == 2, "other orders are not its business")
+	expect(#sent == 2 and held == 2, "other orders are not its business")
+	me.troops = 20000
+	UICtx.send(sender, { type = "attack", tile = 1, ratio = 0.4 })
+	expect(#sent == 3 and held == 2, "an order the floor leaves alone says nothing")
+end
+
+-- the tutorial's floor waits until after "grow", whose card counts the taps down (2026-10-27)
+expect((Tutorial.step_index(Tutorial.FLOOR_FROM) or 0) > (Tutorial.step_index("grow") or math.huge), "no floor before the first neighbour")
+expect(Tutorial.grow_line(3, true) == "Tap empty land 3 more times", "grow: the taps to go")
+expect(Tutorial.grow_line(1, false) == "Click empty land 1 more time", "grow: the last one")
+expect(Tutorial.grow_line(0, true) == Tutorial.STEPS[Tutorial.step_index("grow")].touch, "grow: then the step's own line")
+expect(#Tutorial.grow_line(Tutorial.GROW_TAPS, true) <= 40, "grow's countdown fits a phone's card")
+
+-- a new player's floor after the tutorial: their first ROOKIE_MATCHES matches (2026-10-27)
+expect(Tutorial.rookie(0) and Tutorial.rookie(Tutorial.ROOKIE_MATCHES - 1), "the first matches are a new player's")
+expect(not Tutorial.rookie(Tutorial.ROOKIE_MATCHES), "the next is not")
+expect(Tutorial.ROOKIE_FLOOR > 0 and Tutorial.FLOOR_ARM > Tutorial.ROOKIE_FLOOR, "the new player's floor arms above itself")
+do
+	local Telemetry = require("../src/client/UI/Telemetry")
+	local saved = { matches = 3 }
+	local tel = Telemetry.new({ session = { load_settings = function(_, section)
+		return if section == "stats" then saved else {}
+	end } })
+	expect(tel:matches_before() == 3, "matches before: the server's count")
+	tel.matches_started = 1
+	tel._match = { ended = false }
+	expect(tel:matches_before() == 3, "the match being played is not one before it")
+	tel._match.ended = true
+	expect(tel:matches_before() == 4, "once it is over, it is")
+	tel:new_player()
+	expect(tel:matches_before() == 0, "replaying as a new player: none")
+end
+do
+	local UIAdvisor = require("../src/client/UI/UIAdvisor")
+	local me = { troops = 10000, max_troops = 40000 }
+	local before = 2
+	local ctx = { troop_floor = nil }
+	function ctx.alive_player()
+		return true
+	end
+	function ctx.my()
+		return me
+	end
+	local ui = { ctx = ctx, tutorial = { active = false }, telemetry = { matches_before = function()
+		return before
+	end } }
+	local adv = UIAdvisor.new(ui)
+	adv:check_floor()
+	expect(ctx.troop_floor == nil, "a new player's floor waits for the army to grow")
+	me.troops = 15000
+	adv:check_floor()
+	expect(ctx.troop_floor == Tutorial.ROOKIE_FLOOR, "then an order leaves a fifth of the cap at home")
+	ctx.troop_floor = nil
+	before = Tutorial.ROOKIE_MATCHES
+	adv:check_floor()
+	expect(ctx.troop_floor == nil, "not after the first matches")
+	before = 0
+	ui.tutorial.active = true
+	adv:check_floor()
+	expect(ctx.troop_floor == nil, "the tutorial keeps its own")
 end
 
 -- the Stars, once

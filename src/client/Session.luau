@@ -262,6 +262,11 @@ function Session.new(env: { [string]: any }?)
 	self._tracker = nil :: any
 	self._solo_reported = false
 	self.crate_result = Signal.new() -- (ok, item_id | reason) an open_crate's answer
+	--- RoWorld General (Data/Subscription; server/General): subscribed, as the server last said
+	self.general = false
+	--- (on: boolean, given: { crate?, stars?, skin? }?) the server's word: subscribed or not, and what
+	--- the day's perks just gave
+	self.general_changed = Signal.new()
 	--- (state) the player's party (server/Party.state; team games on: staging only for now)
 	self.party_changed = Signal.new()
 	--- the last party state (nil: parties are off on this server)
@@ -1489,6 +1494,20 @@ function Session._on_net(self: any, op: number, ...: any)
 			for _, key in fresh do
 				self:_emit("unlocked", key)
 			end
+		end
+	elseif op == OP.GENERAL then
+		local st = ...
+		if type(st) == "table" then
+			self.general = st.on == true
+			local g = if type(st.given) == "table" then st.given else nil
+			local given = if g ~= nil
+				then {
+					crate = g.crate == true,
+					stars = if type(g.stars) == "number" then g.stars else nil,
+					skin = if type(g.skin) == "string" then g.skin else nil,
+				}
+				else nil
+			self:_emit("general_changed", self.general, given)
 		end
 	elseif op == OP.CRATE_RESULT then
 		local ok, res = ...

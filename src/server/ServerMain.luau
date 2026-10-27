@@ -45,6 +45,8 @@ local SettingsStore = require(script.Parent.SettingsStore) :: any
 local Analytics = require(script.Parent.Analytics) :: any
 local Purchases = require(script.Parent.Purchases) :: any
 local Rewards = require(script.Parent.Rewards) :: any
+local General = require(script.Parent.General) :: any
+local Subscription = require(Shared.Data.Subscription) :: any
 local MarketplaceService = game:GetService("MarketplaceService")
 local PolicyService = game:GetService("PolicyService")
 local DataStoreService = game:GetService("DataStoreService")
@@ -757,6 +759,9 @@ function ServerMain.start()
 			end)
 			send(player, OP.CREDITS, Purchases.credits(player))
 			send(player, OP.INVENTORY, inventory_of(player))
+			if Subscription.id() ~= "" then
+				send(player, OP.GENERAL, General.state(player))
+			end
 			if party ~= nil then
 				send(player, OP.PARTY_STATE, party:state(player))
 			end
@@ -1284,6 +1289,8 @@ function ServerMain.start()
 	-- Paid random items (the cosmetic crates) are not offered where Roblox's policy restricts them
 	-- (PolicyService.ArePaidRandomItemsRestricted); unknown until checked = restricted.
 	local crates_allowed: { [Player]: boolean } = {}
+	--- the policy was asked (an answer or not): RoWorld General's daily perk waits for it
+	local policy_known: { [Player]: boolean } = {}
 	inventory_of = function(player: Player): any
 		local inv = Purchases.inventory(player)
 		inv.crates_allowed = crates_allowed[player] == true
@@ -1294,6 +1301,7 @@ function ServerMain.start()
 			return PolicyService:GetPolicyInfoForPlayerAsync(player)
 		end)
 		crates_allowed[player] = ok and type(info) == "table" and info.ArePaidRandomItemsRestricted == false
+		policy_known[player] = true
 		send(player, OP.INVENTORY, inventory_of(player))
 	end
 	-- Robux purchases: a receipt is a stored credit before Roblox hears it was granted
@@ -1369,12 +1377,50 @@ function ServerMain.start()
 		double = function(player: Player): boolean
 			return Purchases.has_unlock(player, "stars2x")
 		end,
+		general = General.active,
 		send = function(player: Player, payload: any)
 			send(player, OP.STARS, payload)
 			pcall(Analytics.report, player, "stars_paid", payload.total)
 		end,
 		log = print,
 	})
+	-- RoWorld General (Data/Subscription; 2026-10-27): Roblox says who is subscribed; server/General
+	-- gives the perks
+	General.configure({
+		status = function(player: Player): boolean?
+			local info = (MarketplaceService :: any):GetUserSubscriptionStatusAsync(player, Subscription.id())
+			return if type(info) == "table" then info.IsSubscribed == true else nil
+		end,
+		perks = function(player: Player, day: number, skin: string?): any
+			-- (a crate or Stars: the policy decides, so wait for its answer; unknown = no crates)
+			local t0 = os.clock()
+			while policy_known[player] == nil and player.Parent == Players and os.clock() - t0 < 15 do
+				task.wait(0.5)
+			end
+			return Purchases.general_perks(player, day, skin, crates_allowed[player] == true)
+		end,
+		send = function(player: Player, state: any)
+			send(player, OP.GENERAL, state)
+		end,
+		subscribed = function(player: Player)
+			pcall(Analytics.report, player, "general", "subscribed")
+		end,
+		now = os.time,
+		log = print,
+	})
+	pcall(function()
+		(Players :: any).UserSubscriptionStatusChanged:Connect(function(player: Player, sid: string)
+			if sid == Subscription.id() then
+				task.spawn(General.changed, player)
+			end
+		end)
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(60)
+			pcall(General.tick)
+		end
+	end)
 	MarketplaceService.ProcessReceipt = function(info: any): Enum.ProductPurchaseDecision
 		local ok, r = pcall(Purchases.process_receipt, info)
 		if ok and r == "granted" then
@@ -1388,6 +1434,7 @@ function ServerMain.start()
 	Players.PlayerAdded:Connect(function(player: Player)
 		task.spawn(Purchases.load, player)
 		task.spawn(check_policy, player)
+		task.spawn(General.joined, player)
 		Analytics.joined(player)
 		tag_launch(player)
 		tag_spectator(player)
@@ -1402,6 +1449,7 @@ function ServerMain.start()
 	for _, p in Players:GetPlayers() do
 		task.spawn(Purchases.load, p)
 		task.spawn(check_policy, p)
+		task.spawn(General.joined, p)
 		Analytics.joined(p)
 		tag_launch(p)
 		tag_spectator(p)
@@ -1421,6 +1469,8 @@ function ServerMain.start()
 		analytics_budget[player] = nil
 		credit_budget[player] = nil
 		crates_allowed[player] = nil
+		policy_known[player] = nil
+		General.release(player)
 		Rewards.release(player)
 		Purchases.release(player)
 		pcall(Analytics.left, player)
