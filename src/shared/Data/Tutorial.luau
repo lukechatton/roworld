@@ -70,19 +70,23 @@ function Tutorial.floor_armed(troops: number, cap: number, played_s: number): bo
 end
 --- Seconds on the spawn step before a start is picked for the player.
 Tutorial.AUTO_SPAWN_S = 12
---- "grow": let the troops refill, then one expansion. It teaches the rhythm, never "keep tapping"
---- (2026-10-27: the card said "Keep tapping empty land to grow", which is bad advice: an order sent on
---- an emptied army leaves the nation open, and a small army regrows slowly). An expansion counts when
---- it is sent with the army at GROW_READY of its cap or more; below that the card says to let the
---- troops refill, its bar fills towards ready (Tutorial.refill) and the mark is on the troop count.
----   * v111 (2026-10-27) asked for GROW_TAPS = 2 such expansions and 3x the land, with no bar while
----     the troops refilled: Skip on this step went up by about 60% a match (06:00-16:00 UTC against
----     the day before). Now one expansion, and the wait shows how far it has to go: about 7 s after
----     the "expand" step's order on open land (a headless Sim, 2026-10-27). An order sent before then
----     spends the refill, so the card says to wait for the bar for EARLY_S.
+--- "grow": one expansion, and the card teaches the rhythm: let the troops refill, then expand. Never
+--- "keep tapping" (2026-10-27: the card said "Keep tapping empty land to grow", which is bad advice:
+--- an order sent on an emptied army leaves the nation open, and a small army regrows slowly). While
+--- the army is under GROW_READY of its cap the card says to let the troops refill, its bar fills
+--- towards ready (Tutorial.refill: about 7 s after the "expand" step's order on open land) and the
+--- mark is on the troop count; once ready it asks for the expansion. One sent before the bar is full
+--- counts too, and its green card says `early` (let the bar fill next time) for EARLY_S.
+---   * v111 (2026-10-27) asked for GROW_TAPS = 2 expansions sent ready, and 3x the land, with no bar
+---     while the troops refilled: Skip on this step went up by about 60% a match (06:00-16:00 UTC
+---     against the day before).
+---   * v112 (2026-10-27) asked for one, sent with the bar full; one sent before spent the refill and
+---     did not count. Of the players who made the first tap, 79% finished the step (88% before
+---     v111) and 58% finished the tutorial (63%) (Tutorial funnel, Oct 28-29 against Oct 24-26):
+---     a wait the player can't get past loses them. So since 2026-10-30 the wait is advice.
 Tutorial.GROW_TAPS = 1
 Tutorial.GROW_READY = 0.3
-Tutorial.EARLY_S = 2.5
+Tutorial.EARLY_S = 2.0
 --- "attack": passed over when nobody borders the player this long after the step began.
 Tutorial.CONTACT_WAIT_S = 25
 --- The Attack bar's step asks for one stop of it, RATIO_GOAL (the next one up from where the bar
@@ -114,8 +118,8 @@ Tutorial.STEPS = {
 		touch = "Tap empty land to expand",
 		desktop = "Click empty land to expand",
 		wait = "Now let your troops refill",
-		-- (an order sent while they refill: it spends them, and the bar drops)
-		early = "Wait for the bar to fill",
+		-- (the green card of an expansion sent while they refilled)
+		early = "Done! Next time, let the bar fill",
 		bar = true,
 	},
 	-- (the neighbour before the slider: a first attack at the slider's 20% leaves an army at home; in

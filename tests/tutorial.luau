@@ -97,9 +97,10 @@ do
 		expect(not string.find(string.lower(line), "keep"), "grow never says keep tapping: " .. line)
 	end
 	expect(type(g.wait) == "string" and #g.wait <= 40, "grow's wait line fits a phone's card")
-	expect(type(g.early) == "string" and #g.early <= 40, "and its too-early line")
-	expect(Tutorial.GROW_READY > 0.15 and Tutorial.GROW_READY < 0.5, "an expansion counts with the army part refilled")
-	expect(Tutorial.GROW_TAPS == 1, "one expansion once refilled: the step is short (2026-10-27)")
+	expect(type(g.early) == "string" and #g.early <= 40, "and the line for an expansion sent before the bar filled")
+	expect(Tutorial.EARLY_S >= 1.5 and Tutorial.EARLY_S <= 3, "which stays long enough to read, not to wait on")
+	expect(Tutorial.GROW_READY > 0.15 and Tutorial.GROW_READY < 0.5, "ready: the army part refilled")
+	expect(Tutorial.GROW_TAPS == 1, "one expansion: the step is short, and the wait is advice (2026-10-30)")
 	-- its bar fills towards ready, and doesn't slide back while the cap climbs under it
 	local need = Tutorial.GROW_READY * 100000
 	expect(Tutorial.refill(need * 0.5, 100000) == 0.5, "the bar: half way to ready")

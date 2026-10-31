@@ -18,6 +18,7 @@ local Defs = require("./Defs")
 local Ev = require("./Ev")
 local Rules = require("./Rules")
 local SimState = require("./SimState")
+local Coop = require("../Net/Coop")
 
 local readu8 = buffer.readu8
 local writeu8 = buffer.writeu8
@@ -995,6 +996,10 @@ function SimStructures.install(C)
 			if n == s or e[1] <= rmin2 or self:_hops(n, s, Rules.RAIL_LINK_HOPS) ~= -1 then
 				continue
 			end
+			-- (a local match's step runs as a Coop job spread over frames: Session._local_process.
+			-- A factory finishing makes every city and port in range a station, each routing its
+			-- railroads here: 80 searches, 26 ms of one tick on a Mac (a solo World match, 2026-10-30))
+			Coop.check()
 			local path = self:rail_path(s.tile, n.tile)
 			if #path > 0 and #path < max_path then
 				self:_add_rail(s.sid, n.sid, path)

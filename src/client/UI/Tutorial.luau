@@ -435,8 +435,9 @@ function Tutorial._process(self, delta: number)
 				self._taps = 0
 				self._ready = nil
 				self._refill = nil
-				self._early = 0.0
 				self._line = nil
+				-- (an order sent while "expand"'s card was green was that step's second tap)
+				any = false
 			elseif id == "attack" then
 				self._neighbour = nil
 			elseif id == "ratio" then
@@ -459,21 +460,23 @@ function Tutorial._process(self, delta: number)
 			end
 			point = ui.advisor:frontier_point()
 		elseif id == "grow" then
-			-- let the troops refill, then expand: an order counts when the army was ready
-			-- (Data.GROW_READY) as it went; the bar fills towards ready
+			-- let the troops refill (Data.GROW_READY: the bar fills towards ready), then expand. An
+			-- expansion sent before counts too: its card says to let the bar fill next time
 			if any then
-				if self._ready then
-					self._taps += 1
-				else
-					-- (an order sent meanwhile spends the refill: the bar drops, and the card says why)
+				local early = not self._ready
+				self._taps += 1
+				if early then
+					-- (it spent the refill: the bar drops)
 					self._refill = nil
-					self._early = Data.EARLY_S
 				end
-			end
-			self._early = math.max((self._early or 0.0) - delta, 0.0)
-			if self._taps >= Data.GROW_TAPS then
-				self:_advance()
-				return
+				if self._taps >= Data.GROW_TAPS then
+					self:_advance()
+					if early and self._card.visible then
+						self._text:set_text(step.early)
+						self._flash = Data.EARLY_S
+					end
+					return
+				end
 			end
 			local cap = o.max_troops or 0
 			local f = if cap > 0 then Data.refill(o.troops, cap, self._refill) else 1.0
@@ -489,10 +492,7 @@ function Tutorial._process(self, delta: number)
 				self._ready = ready
 				self._fill.BackgroundColor3 = if ready then UITheme.GREEN else UITheme.AMBER
 			end
-			local line = if ready
-				then (if ctx.touch then step.touch else step.desktop)
-				elseif self._early > 0.0 then step.early
-				else step.wait
+			local line = if ready then (if ctx.touch then step.touch else step.desktop) else step.wait
 			if line ~= self._line then
 				self._line = line
 				self._text:set_text(line)
