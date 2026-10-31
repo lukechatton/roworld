@@ -1078,11 +1078,24 @@ function Sim._claim_pending_spawns(self: any)
 			continue
 		end
 		self._human_disk[id] = self:_spawn_owner(id, t, self.R.SPAWN_RADIUS)
+		if self.phase == Defs.PHASE_PLAYING and not self.solo then
+			-- (one placed when the spawn phase ended, or a late joiner: from its first tick in play)
+			self.o_shield_until[id] = self.tick + Rules.SPAWN_SHIELD_TICKS
+		end
 		if self._auto_placed[id] then
 			self._auto_placed[id] = nil
 			self:msg(id, Defs.MSG_GOOD, "You didn't pick a start, so you were placed here.")
 		elseif self.phase == Defs.PHASE_PLAYING then
-			self:msg(id, Defs.MSG_GOOD, "You have landed. Expand into free land!")
+			self:msg(
+				id,
+				Defs.MSG_GOOD,
+				if self:shielded(id)
+					then string.format(
+						"You have landed. Expand into free land! No one can attack you for %d s",
+						Rules.SPAWN_SHIELD_TICKS // TICK_RATE
+					)
+					else "You have landed. Expand into free land!"
+			)
 		end
 	end
 	table.clear(self._pending_spawn)
@@ -1103,8 +1116,12 @@ function Sim._on_transport_launched(self: any, u: any, target_owner: number)
 	self.ai:on_transport_launched(self, u, target_owner)
 end
 
---- AI transports may only open a new war on a human within the AI's human-protection rules.
+--- No transport lands on a person under their spawn shield; AI transports may only open a new war
+--- on a human within the AI's human-protection rules.
 function Sim._landing_allowed(self: any, id: number, tg: number): boolean
+	if self:shielded(tg) then
+		return false
+	end
 	if self.o_ai[id] == 0 or not self:is_human(tg) or self:attack_between(id, tg) ~= nil then
 		return true
 	end
@@ -1293,6 +1310,10 @@ function Sim.intent_attack_troops(self: any, id: number, t: number, amount: numb
 	if tg ~= 0 and self.o_alive[tg] == 0 then
 		return false
 	end
+	if self:shielded(tg) then
+		self:msg(id, Defs.MSG_INFO, self:shield_text(tg))
+		return false
+	end
 	local o_troops = self.o_troops
 	-- An attack takes min(amount, home troops), floored (troops are whole numbers).
 	local home = o_troops[id]
@@ -1477,6 +1498,9 @@ function Sim._start_playing(self: any)
 	self:ev({ Ev.PHASE, Defs.PHASE_PLAYING, 0 })
 	for id = 1, self.owner_total do
 		if self.o_alive[id] == 1 and self.o_spawned[id] == 1 then
+			if self.o_kind[id] == Defs.KIND_HUMAN and not self.solo then
+				self.o_shield_until[id] = self.tick + Rules.SPAWN_SHIELD_TICKS
+			end
 			local novice = self:is_novice_bot(id)
 			self.o_cap[id] = self.R.max_troops(
 				if novice then Defs.KIND_NATION else self.o_kind[id],

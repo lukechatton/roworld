@@ -583,17 +583,22 @@ end
 
 -- Public check used by the Sim when an AI transport lands on a human's coast.
 function SimAI:may_attack_human(sim, id: number, h: number): boolean
-	-- Tribes have no human protection: a tribe never skips a human target, and
-	-- only human attackers respect spawn immunity.
+	-- Tribes have no human protection (a tribe never skips a human target) beyond the spawn
+	-- shield, which holds for every attacker.
 	if sim.o_kind[id] == KIND_TRIBE then
-		return true
+		return not sim:shielded(h)
 	end
 	return self:_may_attack_human(sim, id, h, sim.tick - sim.playing_since)
 end
 
--- Human protection: this AI's own grace (global minimum + its random delay + more for distant
--- nations) has passed, and fewer than MAX_AI_WARS_ON_HUMAN nations already fight that human.
+-- Human protection: that human's spawn shield is over, this AI's own grace (global minimum + its
+-- random delay + more for distant nations) has passed, and fewer than MAX_AI_WARS_ON_HUMAN nations
+-- already fight that human.
 function SimAI:_may_attack_human(sim, id: number, h: number, age: number): boolean
+	if sim:shielded(h) then
+		-- (a late joiner's spawn shield: the AI's grace counts from the start of play)
+		return false
+	end
 	local d = sim:human_difficulty(id)
 	local grace = Rules.human_grace_ticks(d) + self.grace_jitter[id]
 	if sim:is_novice_bot(id) then

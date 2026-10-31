@@ -379,6 +379,8 @@ function SimState.install(C: any)
 		self.o_bonus_rate = filled(MAXO, 0.0)
 		self.o_bonus_acc = filled(MAXO, 0.0)
 		self.o_traitor_until = filled(MAXO, 0)
+		--- The tick a person's spawn shield ends (Rules.SPAWN_SHIELD_TICKS; 0 = none).
+		self.o_shield_until = filled(MAXO, 0)
 		self.o_spawn_tile = filled(MAXO, -1)
 		self.o_killer = filled(MAXO, 0)
 		--- Owners whose conquest (Ev.CONQUEST, Sim._conquest_gold) was already announced.
@@ -592,6 +594,17 @@ function SimState.install(C: any)
 
 	function C.is_traitor(self: any, id: number): boolean
 		return id > 0 and self.o_traitor_until[id] > self.tick
+	end
+
+	--- No one may attack `id` yet (its spawn shield: Rules.SPAWN_SHIELD_TICKS).
+	function C.shielded(self: any, id: number): boolean
+		return id > 0 and self.o_shield_until[id] > self.tick
+	end
+
+	--- What an attack on shielded `id` tells its sender.
+	function C.shield_text(self: any, id: number): string
+		local s = math.max(1, math.ceil((self.o_shield_until[id] - self.tick) / Rules.TICK_RATE))
+		return string.format("%s just spawned: you can attack them in %d s", self.o_name[id], s)
 	end
 
 	function C.land_share(self: any, id: number): number

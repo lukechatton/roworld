@@ -98,6 +98,10 @@ function SimNaval.install(C)
 			self:msg(id, Defs.MSG_INFO, string.format("%s is your ally", self.o_name[tg]))
 			return false
 		end
+		if self:shielded(tg) then
+			self:msg(id, Defs.MSG_INFO, self:shield_text(tg))
+			return false
+		end
 		-- (a person: kind human and no bot; a bot player's AI holds itself to the AI's limit)
 		if self.o_boats[id] >= Rules.max_boats(self.o_tiles[id], self.o_kind[id] == Defs.KIND_HUMAN and self.o_bot[id] ~= 1) then
 			self:msg(id, Defs.MSG_INFO, "Too many transports at sea")
@@ -201,8 +205,12 @@ function SimNaval.install(C)
 		end
 		local tg = readi32(self.owner, t * 4)
 		if tg ~= 0 and not self:_landing_allowed(id, tg) then
-			-- The coast changed hands while at sea and this attack isn't allowed (human protection).
+			-- The coast changed hands while at sea and this attack isn't allowed (a spawn shield,
+			-- human protection).
 			self.o_troops[id] += u.troops
+			if self:shielded(tg) then
+				self:msg(id, Defs.MSG_INFO, string.format("Your transport turned back: %s just spawned", self.o_name[tg]))
+			end
 			return
 		end
 		-- On landing, the tile is taken for free and every soldier

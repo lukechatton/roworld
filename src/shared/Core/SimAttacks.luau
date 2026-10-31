@@ -556,6 +556,15 @@ function SimAttacks.install(C: any)
 		end
 		self:_send_attack(a)
 		if target ~= 0 then
+			if self:shielded(attacker) and self.o_kind[target] ~= Defs.KIND_TRIBE then
+				-- (attacking a person or a nation ends one's own spawn shield: none attacks from behind it)
+				self.o_shield_until[attacker] = 0
+				self:msg(
+					attacker,
+					Defs.MSG_INFO,
+					string.format("You attacked %s, so your spawn shield is down", self.o_name[target])
+				)
+			end
 			self:add_grudge(target, attacker, Rules.HOSTILE_TICKS)
 			self.o_attacked_tick[target] = self.tick
 			if self:is_human(target) then
@@ -882,7 +891,12 @@ function SimAttacks.install(C: any)
 				conquer(self, t, at, a)
 				a.last_tile = t
 				taken += 1
-				if not neutral and o_tiles[tg] * K_AREA < Rules.ANNEX_BELOW_FULL_TILES then
+				if
+					not neutral
+					and o_tiles[tg] * K_AREA < Rules.ANNEX_BELOW_FULL_TILES
+					and (o_kind[tg] ~= Defs.KIND_HUMAN or a.troops > o_troops[tg])
+				then
+					-- (a person's small nation only once the attack outnumbers its army at home)
 					self:_annex(tg, at)
 					self:end_attack(a, true)
 					return

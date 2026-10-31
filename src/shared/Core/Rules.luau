@@ -96,6 +96,13 @@ local function build(K_LIN: number): any
 	Rules.START_GOLD = 0.0
 	--- Late joiners start with this fraction of the median nation's troops (never below START_TROOPS_HUMAN / 2).
 	Rules.LATE_JOIN_TROOP_FRACTION = 0.4
+	--- Spawn shield (2026-10-30; matches with other people, not solo): for this many ticks from its
+	--- nation's first tick in play (the start of PLAYING, or a late joiner's landing) no one may attack
+	--- a person, by land or by boat (the AI leaves them be too). One who attacks a person or a nation
+	--- loses their own (tribes don't count). A start is about 50 full-size tiles, under
+	--- ANNEX_BELOW_FULL_TILES, so it fell whole to the first tile any attack took: on the first tick of
+	--- play 119 troops took a nation of 26,646.
+	Rules.SPAWN_SHIELD_TICKS = 300
 
 	-- ---------------------------------------------------------------------------------------------
 	-- Difficulty: Relaxed / Standard / Brutal (index = config.difficulty: 0 / 1 / 2)
@@ -621,7 +628,9 @@ local function build(K_LIN: number): any
 	--- Retreat delay: a retreat order freezes the attack and brings the troops home
 	--- 20 ticks later (the attack still advances on the tick after the order).
 	Rules.RETREAT_DELAY_TICKS = 20
-	--- Annexation: a player under 100 full-size tiles is annexed by the attacker.
+	--- Annexation: a player under 100 full-size tiles is annexed by the attacker. A person's nation
+	--- only once the attack has more troops left than its army at home (2026-10-30: the first tile of
+	--- any attack took a start whole, whatever its army; SPAWN_SHIELD_TICKS).
 	Rules.ANNEX_BELOW_FULL_TILES = 100.0
 	--- Performance guard: at most ~572 full-size tiles (this many of our tiles) per
 	--- attack per tick; see tests/growth_rules.luau for when it binds.
