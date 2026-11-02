@@ -53,8 +53,6 @@ party:accept(c, 1)
 party:invite(a, d)
 party:accept(d, 1)
 expect(#party:members(a) == 4, "a party of 4")
-local ok, why = party:invite(a, e)
-expect(not ok and why ~= nil, "a fifth can't be invited")
 -- an expired invite
 local f = player(6, "Fay")
 party:invite(e, f)
@@ -82,6 +80,22 @@ local i, j = player(9, "Ivy"), player(10, "Jon")
 party:arrived(i, "S0:10:1", 10)
 party:arrived(j, "S0:10:1", 10)
 expect(party:key_of(i) == "S0:10:1" and party:key_of(j) == "S0:10:1" and party:is_leader(j), "back from a match: the same party, Jon leads")
+
+-- the size limit (Party.MAX_SIZE: 8)
+do
+	local big = Party.new({ send = function() end, now = function()
+		return clock
+	end, prefix = "S2:" })
+	local lead = player(100, "Lead")
+	for k = 1, Party.MAX_SIZE - 1 do
+		local p = player(100 + k, "P" .. k)
+		big:invite(lead, p)
+		big:accept(p, 100)
+	end
+	expect(#big:members(lead) == 8, "a party of 8")
+	local ok, why = big:invite(lead, player(200, "Ninth"))
+	expect(not ok and why ~= nil and string.find(why, "8", 1, true) ~= nil, "a ninth can't be invited: " .. tostring(why))
+end
 
 print(("party: %d/%d passed"):format(total - fails, total))
 if fails > 0 then

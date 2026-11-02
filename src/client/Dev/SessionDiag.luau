@@ -1431,7 +1431,7 @@ function Diag.start(Main: any)
 			return "focused"
 		elseif op == "party" then
 			-- the title's party panel (layout checks): `party` opens it, `party list` the invite list,
-			-- `party close` closes both
+			-- `party members <n>` a party of n, `party close` closes both
 			local ui = Main.ui
 			local pp = ui and ui.title and ui.title._party
 			if pp == nil then
@@ -1446,6 +1446,32 @@ function Diag.start(Main: any)
 				local PP = require(script.Parent.Parent:WaitForChild("UI"):WaitForChild("PartyPanel")) :: any
 				PP.fake_players = fakes
 				pp:open_list()
+			elseif words[2] == "members" then
+				-- `party members 8`: the panel open with a party of n (stand-ins): its layout full
+				local me = Players.LocalPlayer
+				local members = {}
+				for i = 1, tonumber(words[3]) or 8 do
+					table.insert(members, {
+						uid = if i == 1 then me.UserId else -i,
+						name = if i == 1 then me.DisplayName else "Playername" .. i,
+						leader = i == 1,
+					})
+				end
+				pp:set_state({ members = members, max = 8, leader = true, invites = {} })
+				pp._open = true
+				pp:apply_layout()
+				task.wait(0.2)
+				local r = pp._panel:get_global_rect()
+				return ("party panel %d members: x %d..%d y %d..%d (screen %dx%d, compact=%s)"):format(
+					#members,
+					r.Min.X,
+					r.Max.X,
+					r.Min.Y,
+					r.Max.Y,
+					pp.ctx.vp.X,
+					pp.ctx.vp.Y,
+					tostring(pp.ctx.compact)
+				)
 			elseif words[2] == "list" then
 				pp:open_list()
 			elseif words[2] == "close" then

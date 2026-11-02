@@ -16,6 +16,10 @@ local Scroll = (require("./HelpOverlay") :: any).Scroll
 local PartyPanel = W.class(W.Control)
 
 PartyPanel.WIDTH = 250.0
+--- More members than this show in two columns, the panel this wide (parties of up to 8 since
+--- 2026-11-01: eight rows ran past a phone's screen).
+PartyPanel.ONE_COLUMN_MAX = 4
+PartyPanel.WIDTH_WIDE = 360.0
 --- An invite button shows SENT this long.
 PartyPanel.SENT_S = 3.0
 --- The invite list's rows (px) and what the list leaves of the screen's height for its head, the Roblox
@@ -58,7 +62,7 @@ function PartyPanel.new(c: any)
 	self._count.size_flags_vertical = W.SHRINK_CENTER
 	head:add_child(self._count)
 	v:add_child(head)
-	self._members = T.vbox(4)
+	self._members = T.hbox(12)
 	v:add_child(self._members)
 	self._invites = T.vbox(6)
 	v:add_child(self._invites)
@@ -198,8 +202,19 @@ function PartyPanel.set_state(self, st: any)
 	local members = if type(st.members) == "table" then st.members else {}
 	local leader = st.leader == true
 	clear(self._members)
-	for _, m in members do
+	local columns = if #members > PartyPanel.ONE_COLUMN_MAX then 2 else 1
+	self._wide = columns > 1
+	local per_column = math.ceil(#members / columns)
+	local cols = {}
+	for c = 1, columns do
+		cols[c] = T.vbox(4)
+		cols[c].size_flags_horizontal = W.EXPAND_FILL
+		self._members:add_child(cols[c])
+	end
+	for i, m in members do
 		local row = T.hbox(6)
+		-- (rows with and without a kick button line up across the columns)
+		row:set_min_size(Vector2.new(0, 26))
 		local crown = T.icon_rect(if m.leader then "crown" else "users", 14.0, if m.leader then T.AMBER else T.TEXT_3)
 		crown.size_flags_vertical = W.SHRINK_CENTER
 		row:add_child(crown)
@@ -220,7 +235,7 @@ function PartyPanel.set_state(self, st: any)
 			end)
 			row:add_child(kick)
 		end
-		self._members:add_child(row)
+		cols[(i - 1) // per_column + 1]:add_child(row)
 	end
 	clear(self._invites)
 	for _, inv in if type(st.invites) == "table" then st.invites else {} do
@@ -401,7 +416,9 @@ function PartyPanel.apply_layout(self)
 	local compact = ctx.compact
 	local p, pill = self._panel, self._pill
 	local x = 12.0 + ctx.insets.x
-	p:set_min_size(Vector2.new(PartyPanel.WIDTH, 0))
+	local width = if self._wide then PartyPanel.WIDTH_WIDE else PartyPanel.WIDTH
+	p:set_min_size(Vector2.new(width, 0))
+	self._hint:set_min_size(Vector2.new(width - 28, 0))
 	pill:set_visible(compact)
 	if compact then
 		-- phones: the PARTY button under the top bar on the left; the panel under it while open

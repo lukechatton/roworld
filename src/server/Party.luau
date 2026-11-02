@@ -22,7 +22,10 @@
 local Party = {}
 Party.__index = Party
 
-Party.MAX_SIZE = 4
+--- Players in a party at most (4 until 2026-11-01; the user: "let's allow up to 8 per party", after a
+--- group of five asked for "5 person lobbys" so they could all play together). The lobby service seats
+--- up to 8 in one take.
+Party.MAX_SIZE = 8
 --- An invite waits this long for an answer.
 Party.INVITE_TTL_S = 60
 --- A player invites the same player again only this long after.
