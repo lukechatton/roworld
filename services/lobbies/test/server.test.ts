@@ -368,6 +368,29 @@ test("hubs' presence reaches the live stats; match servers' is ignored", async (
 	}
 });
 
+test("server perf reports reach /health and the stats", async () => {
+	const { Perf } = await import("../src/perf");
+	const store = new LobbyStore(() => Date.now() / 1000);
+	const perf = new Perf(() => Date.now() / 1000);
+	const server = createServer(store, { secret: SECRET, clockSkew: 120, flags: () => ({ enabled: true }), log: () => {}, perf, statsPassword: () => PASSWORD });
+	await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+	const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+	try {
+		const c = new LobbyClient(url, SECRET);
+		const ok = await c.post<any>("/v1/perf", { jobId: "m1", role: "match", perf: { role: "match", fps: 1.5, slow_share: 0.97, worst_ms: 900, steps: 90, step_ms_avg: 140, stage: "playing", humans: 50, players: 50, map: "world", mode: "world", max: 50, minute: 31, mem_mb: 700, age_min: 40, version: 115 } });
+		assert.equal(ok.status, 200);
+		assert.equal(ok.verified, true);
+		const bad = await c.post<any>("/v1/perf", { jobId: "m2", role: "match", perf: { role: "match", fps: "fast" } });
+		assert.equal(bad.status, 400);
+		const health = JSON.parse((await request(url, "/health")).body);
+		assert.equal(health.perf.servers, 1);
+		assert.equal(health.perf.bands.match["under 3"], 1);
+		assert.equal(health.perf.slowest[0].stepMsAvg, 140);
+	} finally {
+		server.close();
+	}
+});
+
 test("take / release / list(live) over signed HTTP", async () => {
 	await withServer(async (url) => {
 		const c = new LobbyClient(url, SECRET);

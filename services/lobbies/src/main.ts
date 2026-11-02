@@ -2,6 +2,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { envReader, loadConfig, readEnabled } from "./config";
+import { describe, Perf, type PerfSample } from "./perf";
 import { Presence, type Sample } from "./presence";
 import { createServer } from "./server";
 import { LobbyStore } from "./store";
@@ -91,9 +92,41 @@ presence.onSample = (smp) => {
 		log("warn", `could not append to ${presenceFile}: ${(e as Error).message}`);
 	}
 };
+// how the game servers keep up (perf.ts): slow ones in the log, a sample a minute in perf.jsonl (30 days)
+const perf = new Perf(() => Date.now() / 1000);
+const perfFile = config.stateFile ? path.join(dir, "perf.jsonl") : null;
+if (perfFile && fs.existsSync(perfFile)) {
+	try {
+		const list: PerfSample[] = [];
+		for (const line of fs.readFileSync(perfFile, "utf8").split("\n")) {
+			if (!line.trim()) continue;
+			try {
+				list.push(JSON.parse(line));
+			} catch {
+				// a torn last line
+			}
+		}
+		perf.loadSamples(list);
+		if (list.length > perf.samples.length + 1000) {
+			fs.writeFileSync(perfFile, perf.samples.map((m) => JSON.stringify(m)).join("\n") + "\n", { mode: 0o600 });
+		}
+	} catch (e) {
+		log("warn", `could not read ${perfFile}: ${(e as Error).message}`);
+	}
+}
+perf.onSample = (smp) => {
+	if (!perfFile) return;
+	try {
+		fs.appendFileSync(perfFile, JSON.stringify(smp) + "\n", { mode: 0o600 });
+	} catch (e) {
+		log("warn", `could not append to ${perfFile}: ${(e as Error).message}`);
+	}
+};
+perf.onSlow = (job, r) => log("info", describe(job, r));
 const sampler = setInterval(() => {
 	const live = store.liveNow();
 	presence.sample(live.waiting, live.playing);
+	perf.sample();
 }, 60_000);
 
 function saveState(): void {
@@ -120,7 +153,7 @@ const flagTimer = setInterval(() => {
 // the stats pages' password (STATS_PASSWORD in .env, read again every 5 s; unset: the pages stay locked)
 const statsPassword = envReader(dir, "STATS_PASSWORD");
 if (config.oldSecret) log("info", `rotation: the previous secret is accepted until ${new Date(config.oldSecret.until * 1000).toISOString()}`);
-const server = createServer(store, { secret: config.secret, oldSecret: config.oldSecret, clockSkew: config.clockSkew, flags: () => ({ enabled }), log, presence, statsPassword });
+const server = createServer(store, { secret: config.secret, oldSecret: config.oldSecret, clockSkew: config.clockSkew, flags: () => ({ enabled }), log, presence, perf, statsPassword });
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 70_000;
 server.requestTimeout = 15_000;

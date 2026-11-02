@@ -103,6 +103,12 @@ MatchServer.STEP_FAILED_NOTICE = "The match ran into a problem. You're back at t
 MatchServer.IDLE_DROP_MSEC = 5 * 60 * 1000
 --- Catch-up cap: at most this many ticks are stepped after a server hitch.
 MatchServer.MAX_CATCHUP_TICKS = 6
+--- ... and only while a frame has spent less than this on them (one always runs). A server whose
+--- steps take 100 ms or more never catches up: it ran all 6 in every frame, frames of 0.6 s and up
+--- with everyone's orders and updates waiting on them (2026-11-01: the dashboard's server frame
+--- rate P10 has been 1-4 fps at night since 2026-10-26; ServerPerf reports which servers). Now it
+--- runs about one a frame: the match runs a little slower than the clock, and the server answers.
+MatchServer.CATCHUP_BUDGET_S = 0.05
 --- Match construction runs as a Coop job with this budget per server frame (never a long hitch
 --- for the players already connected, as long as the Core loops call Coop.check()).
 MatchServer.BUILD_BUDGET_S = 0.012
@@ -195,6 +201,8 @@ function MatchServer.new(deps: { [string]: any })
 		snapshot_bytes = 0,
 		intents_ok = 0,
 		intents_dropped = 0,
+		catchup_frames = 0, -- frames that stepped more than one tick
+		budget_stops = 0, -- frames that left ticks for the next one (CATCHUP_BUDGET_S)
 	}
 	return self
 end
@@ -576,9 +584,20 @@ function MatchServer.process(self: any, delta: number)
 	elseif stage == STAGE_SPAWN or stage == STAGE_PLAYING then
 		local tick_sec = MatchServer.TICK_SEC
 		self._mp_acc = math.min(self._mp_acc + delta, tick_sec * MatchServer.MAX_CATCHUP_TICKS)
+		local clock = self.deps.clock or os.clock
+		local t0 = clock()
+		local n = 0
 		while self._mp_acc >= tick_sec and self._mp_sim ~= nil do
+			if n > 0 and clock() - t0 >= MatchServer.CATCHUP_BUDGET_S then
+				self.stats.budget_stops += 1
+				break
+			end
 			self._mp_acc -= tick_sec
 			self:_server_step()
+			n += 1
+		end
+		if n > 1 then
+			self.stats.catchup_frames += 1
 		end
 	elseif stage == STAGE_OVER then
 		self._stage_time -= delta
@@ -1353,10 +1372,13 @@ function MatchServer.take_stats(self: any): { [string]: number }
 		snapshot_ms = st.snapshot_ms or 0,
 		intents_ok = st.intents_ok,
 		intents_dropped = st.intents_dropped,
+		catchup_frames = st.catchup_frames,
+		budget_stops = st.budget_stops,
 	}
 	st.steps, st.step_ms_total, st.step_ms_max, st.encode_ms_total = 0, 0, 0, 0
 	st.bytes_sent, st.deltas_sent, st.delta_bytes_max, st.snapshots_sent = 0, 0, 0, 0
 	st.intents_ok, st.intents_dropped = 0, 0
+	st.catchup_frames, st.budget_stops = 0, 0
 	table.clear(list)
 	return out
 end

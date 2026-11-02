@@ -57,6 +57,8 @@
 --   Analytics.report(player, kind, a, b, c)   an OP.ANALYTICS message
 --   Analytics.left(player)      PlayerRemoving (an open match ends as "Quit Game")
 
+local Pacer = require("./Pacer")
+
 local Analytics = {}
 
 Analytics.ONBOARDING = {
@@ -147,12 +149,42 @@ type Match = {
 type Entry = { onboarding: { [number]: boolean }, match: Match? }
 -- (a Match may also carry `tutorial`: the tutorial steps logged for it)
 
+--- Roblox allows a server 120 + 20 x its players AnalyticsService events a minute (docs: "Event tracking
+--- limitations") and drops the rest with "AnalyticsService: You have sent too many events" (~17,500 a
+--- day in the error report since 2026-10-27). The events now go out through a Pacer at this share of
+--- that rate, a burst of PACE_BURST_S of it at once; a player has at most PACE_PER_PLAYER waiting (a
+--- client may report 6 times a second: one can't crowd out the rest).
+Analytics.PACE_SHARE = 0.75
+Analytics.PACE_BURST_S = 10
+Analytics.PACE_PER_PLAYER = 40
+Analytics.PACE_MAX_QUEUED = 3000
+
 local IS_ROBLOX = typeof(game) == "Instance"
 local deps: { [string]: any } = {}
 if IS_ROBLOX then
 	local AnalyticsService = game:GetService("AnalyticsService")
 	local HttpService = game:GetService("HttpService")
+	local Players = game:GetService("Players")
 	local studio = game:GetService("RunService"):IsStudio()
+	local pacer = Pacer.new({
+		rate = function(): number
+			return Analytics.PACE_SHARE * (120 + 20 * #Players:GetPlayers()) / 60
+		end,
+		burst_s = Analytics.PACE_BURST_S,
+		max_queued = Analytics.PACE_MAX_QUEUED,
+		per_key_max = Analytics.PACE_PER_PLAYER,
+		now = os.clock,
+		on_error = function(err: any)
+			warn("[Analytics] " .. tostring(err))
+		end,
+	})
+	Analytics.pacer = pacer
+	task.spawn(function()
+		while true do
+			task.wait(0.25)
+			pacer:pump()
+		end
+	end)
 	local function fields(f: { string }?): any
 		if f == nil then
 			return nil
@@ -169,21 +201,21 @@ if IS_ROBLOX then
 			print(string.format("[Analytics] onboarding %d %s (%s)", step, name, player.Name))
 			return
 		end
-		AnalyticsService:LogOnboardingFunnelStepEvent(player, step, name)
+		pacer:submit(player, AnalyticsService.LogOnboardingFunnelStepEvent, AnalyticsService, player, step, name)
 	end
 	deps.funnel = function(player: Player, funnel: string, session: string, step: number, name: string, f: { string }?)
 		if studio then
 			print(string.format("[Analytics] funnel %s %d %s [%s]", funnel, step, name, table.concat(f or {}, ", ")))
 			return
 		end
-		AnalyticsService:LogFunnelStepEvent(player, funnel, session, step, name, fields(f))
+		pacer:submit(player, AnalyticsService.LogFunnelStepEvent, AnalyticsService, player, funnel, session, step, name, fields(f))
 	end
 	deps.custom = function(player: Player, name: string, value: number, f: { string }?)
 		if studio then
 			print(string.format("[Analytics] event %s = %s [%s]", name, tostring(value), table.concat(f or {}, ", ")))
 			return
 		end
-		AnalyticsService:LogCustomEvent(player, name, value, fields(f))
+		pacer:submit(player, AnalyticsService.LogCustomEvent, AnalyticsService, player, name, value, fields(f))
 	end
 	deps.guid = function(): string
 		return HttpService:GenerateGUID(false)

@@ -24,6 +24,8 @@ local SettingsMod: any = if IS_ROBLOX
 	then require((game :: any):GetService("ReplicatedStorage"):WaitForChild("Airfront").Net.Settings)
 	else require("../shared/Net/Settings")
 
+local DsGate = require("./DsGate")
+
 local SettingsStore = {}
 
 SettingsStore.STORE_NAME = "AirfrontSettings_v1"
@@ -60,6 +62,7 @@ local deps: { [string]: any } = {}
 if IS_ROBLOX then
 	deps.players = game:GetService("Players")
 	deps.datastores = game:GetService("DataStoreService")
+	deps.gate = DsGate.wrap -- (budget-aware, throttled requests sent again: DsGate)
 	deps.spawn = task.spawn
 	deps.wait = task.wait
 	deps.now = os.clock
@@ -97,7 +100,7 @@ local function get_store(): any
 			return ds:GetDataStore(SettingsStore.STORE_NAME)
 		end)
 		if ok then
-			store = s
+			store = if deps.gate then deps.gate(s) else s
 		end
 	end
 	return store

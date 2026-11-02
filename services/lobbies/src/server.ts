@@ -3,6 +3,7 @@
 // docs/lobby-service.md "Endpoints".
 import * as http from "http";
 import { OldSecret, signResponse, Verifier } from "./auth";
+import { parseReport, type Perf } from "./perf";
 import type { Presence } from "./presence";
 import { buildStats } from "./stats";
 import { clientIp, COOKIE_DAYS, cookieHeader, isLoopback, loginPage, safeNext, StatsAuth, viaCloudflare } from "./statsAuth";
@@ -42,7 +43,7 @@ function hubCounts(v: unknown): { players: number; solo: number; soloEasy: numbe
 	return { players: n("players"), solo: n("solo"), soloEasy: n("solo_easy"), soloMedium: n("solo_medium"), soloHard: n("solo_hard"), title: n("title") };
 }
 
-export function buildRoutes(store: LobbyStore, flags: () => { enabled: boolean }, now: () => number, seen: Seen, presence?: Presence): Record<string, Handler> {
+export function buildRoutes(store: LobbyStore, flags: () => { enabled: boolean }, now: () => number, seen: Seen, presence?: Presence, perf?: Perf): Record<string, Handler> {
 	const mark = (b: Record<string, unknown>, jobId: string): void => {
 		(b.role === "match" ? seen.match : seen.hub).set(jobId, now());
 	};
@@ -127,12 +128,20 @@ export function buildRoutes(store: LobbyStore, flags: () => { enabled: boolean }
 			mark(b, jobId);
 			return { ok: true, ...store.lookupPsid(str(b.psid, "psid", 64, PSID_RE)) };
 		},
+		// a server's minute (ServerPerf.luau; perf.ts)
+		"/v1/perf": (b, jobId) => {
+			mark(b, jobId);
+			const r = parseReport(b.perf);
+			if (perf) perf.report(jobId, r);
+			return { ok: true };
+		},
 		"/v1/status": () => ({ ok: true, flags: flags(), counts: store.counts(), counters: store.counters, list: store.list() }),
 	};
 }
 
 export interface ServerOptions {
 	presence?: Presence;
+	perf?: Perf;
 	secret: string;
 	/** The previous secret while a rotation is under way (RL_SECRET_OLD / RL_SECRET_OLD_UNTIL). */
 	oldSecret?: OldSecret | null;
@@ -150,7 +159,7 @@ export function createServer(store: LobbyStore, opts: ServerOptions): http.Serve
 	const verifier = new Verifier(opts.secret, opts.clockSkew, opts.oldSecret ?? null);
 	const nowSec = opts.nowSec ?? (() => Math.floor(Date.now() / 1000));
 	const seen: Seen = { hub: new Map(), match: new Map() };
-	const routes = buildRoutes(store, opts.flags, () => (opts.nowSec ? opts.nowSec() : Date.now() / 1000), seen, opts.presence);
+	const routes = buildRoutes(store, opts.flags, () => (opts.nowSec ? opts.nowSec() : Date.now() / 1000), seen, opts.presence, opts.perf);
 	const started = Date.now();
 	let requests = 0;
 	let rejected = 0;
@@ -172,6 +181,7 @@ export function createServer(store: LobbyStore, opts: ServerOptions): http.Serve
 			...buildStats(store.starts, clock()),
 			now: { ...live, solo: p ? p.solo : 0, soloEasy: p ? p.soloEasy : 0, soloMedium: p ? p.soloMedium : 0, soloHard: p ? p.soloHard : 0, title: p ? p.title : 0, hubs: p ? p.hubs : 0 },
 			players24h: opts.presence ? opts.presence.series(24, 96) : [],
+			perf: opts.perf ? opts.perf.summary() : null,
 		});
 	};
 	let pushTimer: NodeJS.Timeout | null = null;
@@ -332,6 +342,7 @@ export function createServer(store: LobbyStore, opts: ServerOptions): http.Serve
 				matchServers: liveCount(seen.match),
 				...store.counts(),
 				counters: store.counters,
+				perf: opts.perf ? opts.perf.summary(5) : null,
 				byRoute,
 				via,
 			});

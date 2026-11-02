@@ -43,6 +43,9 @@ local MapList = require(Shared.Data.MapList) :: any
 local MatchServer = require(script.Parent.MatchServer) :: any
 local SettingsStore = require(script.Parent.SettingsStore) :: any
 local Analytics = require(script.Parent.Analytics) :: any
+local ServerPerf = require(script.Parent.ServerPerf) :: any
+local AdminCheck = require(script.Parent.AdminCheck) :: any
+local DsGate = require(script.Parent.DsGate) :: any
 local Purchases = require(script.Parent.Purchases) :: any
 local Rewards = require(script.Parent.Rewards) :: any
 local General = require(script.Parent.General) :: any
@@ -73,11 +76,11 @@ ServerMain.HOP_GAP_S = 15
 --- at most this often (LOBBY); the SETTINGS reply has its own, longer limit (SettingsStore.replay).
 --- review_code.md R2-2: every HELLO used to echo the whole stored settings blob.
 ServerMain.HELLO_MIN_INTERVAL_S = 2.0
-ServerMain.STATS_EVERY_S = 30
+--- The match's instrumentation window; each one also goes to the lobby service (ServerPerf; 30 s
+--- until 2026-11-01).
+ServerMain.STATS_EVERY_S = 60
 --- Hubs push the public-lobby list to their players this often (seconds).
 ServerMain.LOBBIES_PUSH_S = 2.0
---- Group rank that counts as a game admin (254 = Admin, 255 = Owner in a default group).
-ServerMain.ADMIN_RANK = 254
 
 local started = false
 
@@ -1180,25 +1183,37 @@ function ServerMain.start()
 	-- game menu's "Replay as new player" shows on production too.
 	local admins: { [Player]: boolean } = {}
 	local admin_sent: { [Player]: string } = {}
-	local function is_admin(player: Player): boolean
-		if RunService:IsStudio() then
-			return true
-		end
-		if game.CreatorType == Enum.CreatorType.Group then
-			if player:GetRankInGroup(game.CreatorId) >= ServerMain.ADMIN_RANK then
-				return true
-			end
-			-- the group's owner, whatever their role's rank
+	-- (AdminCheck: the group's owner once per server, each player's answer shared by every server)
+	local admin_cache: any = nil
+	pcall(function()
+		admin_cache = game:GetService("MemoryStoreService"):GetHashMap("admins_v1")
+	end)
+	local admin_check = AdminCheck.new({
+		studio = RunService:IsStudio(),
+		group = game.CreatorType == Enum.CreatorType.Group,
+		creator_id = game.CreatorId,
+		rank = function(player: Player): number
+			return player:GetRankInGroup(game.CreatorId)
+		end,
+		owner = function(): number?
 			local info = game:GetService("GroupService"):GetGroupInfoAsync(game.CreatorId)
-			return type(info) == "table" and type(info.Owner) == "table" and info.Owner.Id == player.UserId
-		end
-		return player.UserId == game.CreatorId
-	end
-	--- The group lookups are web calls that can fail now and then: a few tries before giving up.
+			return if type(info) == "table" and type(info.Owner) == "table" then info.Owner.Id else nil
+		end,
+		cache_get = if admin_cache ~= nil
+			then function(key: string): any
+				return admin_cache:GetAsync(key)
+			end
+			else nil,
+		cache_set = if admin_cache ~= nil
+			then function(key: string, value: any, ttl_s: number)
+				admin_cache:SetAsync(key, value, ttl_s)
+			end
+			else nil,
+	})
 	local function check_admin(player: Player)
 		task.spawn(function()
-			for attempt = 1, 4 do
-				local ok, yes = pcall(is_admin, player)
+			for attempt = 1, #AdminCheck.RETRY_S + 1 do
+				local ok, yes = pcall(admin_check.is_admin, admin_check, player)
 				if player.Parent ~= Players then
 					return
 				end
@@ -1206,19 +1221,15 @@ function ServerMain.start()
 					if yes then
 						admins[player] = true
 						player:SetAttribute("AF_Admin", true)
+						print(string.format("[Admin] %s (%d): game admin", player.Name, player.UserId))
 					end
-					print(
-						string.format(
-							"[Admin] %s (%d): %s",
-							player.Name,
-							player.UserId,
-							if yes then "game admin" else "player"
-						)
-					)
 					return
 				end
-				warn(string.format("[Admin] check %d for %s failed: %s", attempt, player.Name, tostring(yes)))
-				task.wait(2 * attempt)
+				if attempt > #AdminCheck.RETRY_S then
+					warn(string.format("[Admin] check for %s failed: %s", player.Name, tostring(yes)))
+					return
+				end
+				task.wait(AdminCheck.RETRY_S[attempt])
 			end
 		end)
 	end
@@ -1313,7 +1324,8 @@ function ServerMain.start()
 	-- (Studio playtests write the real DataStores: their test credits go to a store of their own)
 	local store_name = Purchases.STORE .. (if RunService:IsStudio() then "_studio" else "")
 	local got_store, purchase_store = pcall(function()
-		return DataStoreService:GetDataStore(store_name)
+		-- (budget-aware, throttled requests sent again: DsGate)
+		return DsGate.wrap(DataStoreService:GetDataStore(store_name))
 	end)
 	if not got_store then
 		if not RunService:IsStudio() then
@@ -1518,7 +1530,34 @@ function ServerMain.start()
 	local stats_time = 0.0
 	local lobby_push = 0.0
 	local studio_beat = 0.0
+	local perf = ServerPerf.new()
+	local StatsService = game:GetService("Stats")
+	--- What this server runs, for its ServerPerf report.
+	local function perf_context(): { [string]: any }
+		local ctx: { [string]: any } = {
+			role = ServerMain.kind,
+			stage = server:stage(),
+			humans = server:participant_count(),
+			players = #Players:GetPlayers(),
+			mem_mb = StatsService:GetTotalMemoryUsageMb(),
+			age_min = time() / 60,
+			version = game.PlaceVersion,
+		}
+		local sim = server:sim()
+		if sim ~= nil then
+			ctx.minute = sim.tick * MatchServer.TICK_SEC / 60
+			ctx.attacks = #sim.attacks
+		end
+		local l = if host ~= nil then host.lobby else nil
+		if l ~= nil then
+			ctx.map = l.map
+			ctx.mode = l.mode or "ffa"
+			ctx.max = l.max
+		end
+		return ctx
+	end
 	RunService.Heartbeat:Connect(function(dt: number)
+		perf:frame(dt)
 		admin_time += dt
 		if admin_time >= 1.0 then
 			admin_time = 0.0
@@ -1585,6 +1624,13 @@ function ServerMain.start()
 			local st = server:take_stats()
 			ServerMain.last_stats = st
 			ServerMain.last_stats_window = elapsed
+			local ok_r, report = pcall(perf.take, perf, st, perf_context())
+			local client = ServerMain.lobby_client
+			if ok_r and client ~= nil then
+				task.spawn(function()
+					pcall(client.post, client, "/v1/perf", { role = ServerMain.kind, perf = report })
+				end)
+			end
 			if workspace:GetAttribute("AF_NET_STATS") == true and st.steps > 0 then
 				local n = math.max(1, server:participant_count())
 				print(
