@@ -3,6 +3,8 @@
 -- back to a hub (a public server of the same place). Teleports cannot run in Studio: there `studio`
 -- returns stand-ins (a fake reserved server; `send` reports "studio" so the caller can run the match
 -- on the same server instead).
+-- `stamp(players, data?) -> data` (server/Handoff) adds the id under which the players' records follow
+-- them to the server they arrive on.
 
 local TeleportService = game:GetService("TeleportService")
 local RunService = game:GetService("RunService")
@@ -15,7 +17,7 @@ Teleports.RETRIES = 3
 --- "already in progress" — 600 warnings a day).
 Teleports.PENDING_S = 20
 
-function Teleports.live(place_id: number)
+function Teleports.live(place_id: number, stamp: ((any, any) -> any)?)
 	local t = {}
 	local pending: { [Player]: number } = {}
 	TeleportService.TeleportInitFailed:Connect(function(player: Player)
@@ -33,7 +35,7 @@ function Teleports.live(place_id: number)
 	function t.send(players: { Player }, code: string, data: { [string]: any }): (boolean, string?)
 		local opts = Instance.new("TeleportOptions")
 		opts.ReservedServerAccessCode = code
-		opts:SetTeleportData(data)
+		opts:SetTeleportData(if stamp ~= nil then stamp(players, data) else data)
 		local last: any = nil
 		for attempt = 1, Teleports.RETRIES do
 			local ok, err = pcall(function()
@@ -62,10 +64,11 @@ function Teleports.live(place_id: number)
 		if #list == 0 then
 			return true, nil -- (all on their way already)
 		end
+		local d = if stamp ~= nil then stamp(list, data) else data
 		local ok, err = pcall(function()
-			if data ~= nil then
+			if d ~= nil then
 				local opts = Instance.new("TeleportOptions")
-				opts:SetTeleportData(data)
+				opts:SetTeleportData(d)
 				TeleportService:TeleportAsync(place_id, list, opts)
 			else
 				TeleportService:TeleportAsync(place_id, list)
@@ -104,11 +107,11 @@ function Teleports.studio()
 	return t
 end
 
-function Teleports.for_place(place_id: number)
+function Teleports.for_place(place_id: number, stamp: ((any, any) -> any)?)
 	if RunService:IsStudio() then
 		return Teleports.studio()
 	end
-	return Teleports.live(place_id)
+	return Teleports.live(place_id, stamp)
 end
 
 return Teleports

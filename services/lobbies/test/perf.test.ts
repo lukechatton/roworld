@@ -92,3 +92,19 @@ test("a slow server is logged at most every LOG_EVERY_S; samples count the slow 
 	assert.deepEqual([smp.matches, smp.slowMatches, smp.hubs, smp.slowHubs], [2, 1, 0, 0]);
 	assert.deepEqual(seen, [1]);
 });
+
+test("hand-offs and lost Stars: the servers' latest minutes added up, in the summary and the samples", () => {
+	const t = 9000;
+	const p = new Perf(() => t);
+	p.report("hub-1", parseReport({ role: "hub", fps: 60, players: 30, mem_mb: 300, age_min: 100, version: 116, handoff_hits: 40, handoff_misses: 2, handoff_none: 5, handoff_sent: 38 }));
+	p.report("match-1", parseReport(wire({ handoff_hits: 48, handoff_sent: 3, stars_lost: 1, stars_lost_amount: 120 })));
+	p.report("old-1", parseReport(wire({ version: 115 })));
+	const s = p.summary();
+	assert.deepEqual(s.handoff, { hits: 88, misses: 2, none: 5, sent: 41 });
+	assert.deepEqual(s.starsLost, { payouts: 1, stars: 120 });
+	const smp = p.sample();
+	assert.deepEqual(smp.handoff, s.handoff);
+	assert.deepEqual(smp.starsLost, s.starsLost);
+	assert.throws(() => parseReport(wire({ handoff_hits: -1 })), Invalid);
+	assert.throws(() => parseReport(wire({ stars_lost: 0.5 })), Invalid);
+});

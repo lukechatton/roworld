@@ -6,12 +6,17 @@
 -- spends a credit when the moment comes (Purchases.use); one bought after the moment passed stays
 -- for the next time.
 --
---   Purchases.configure(deps)     { datastore = DataStore, notify = fn(player, credits), log? }
+--   Purchases.configure(deps)     { datastore = DataStore, notify = fn(player, credits), log?, warn?,
+--                                   arrived? = fn(player) -> { p = record? }? }
 --   Purchases.process_receipt(info) -> "granted" | "not_processed"   (a product's `count` credits)
---   Purchases.load(player)        read the record (join; retried while Roblox refuses it); notify
+--   Purchases.load(player)        read the record (join; retried while Roblox refuses it), or take the
+--                                 one the last server handed on (deps.arrived: server/Handoff); notify
 --   Purchases.credits(player) -> { [kind]: number }
 --   Purchases.use(player, kind) -> (ok, err?)   spend one (yields)
+--   Purchases.settle(player, max_s) -> record?  leaving for another server: the record once this
+--                                 server's writes have landed (yields)
 --   Purchases.release(player)     PlayerRemoving
+--   Purchases.lost                { payouts, stars } that could not be paid after every retry
 --   Purchases.open_crate(player) -> (ok, item_id | err)   spend a crate credit, roll (never a duplicate)
 --   Purchases.equip(player, slot, id | false) -> (ok, err?)   "skin" / "flag"; only owned items
 --   Purchases.inventory(player) -> { owned = { id }, equipped = { skin?, flag? }, crates_bought,
@@ -103,6 +108,8 @@ Purchases.LOAD_BACKOFF = { 1, 3, 6, 10 }
 --- LOAD_RETRY_S, LOAD_RETRIES more times, while the player stays.
 Purchases.LOAD_RETRY_S = 20
 Purchases.LOAD_RETRIES = 30
+--- Stars that could not be paid on this server: every write failed, DsGate's retries included.
+Purchases.lost = { payouts = 0, stars = 0 }
 
 local deps: { [string]: any } = {}
 local cache: { [any]: { [string]: number } } = {}
@@ -111,6 +118,29 @@ local inv: { [any]: any } = {}
 --- player -> the load that is still trying to read their record (a token: a newer load, a write
 --- that brought the record, or leaving ends it)
 local loading: { [any]: any } = {}
+--- player -> their whole record as last read or written (handed to the next server: Purchases.settle)
+local records: { [any]: Record } = {}
+--- user id -> this server's writes to their record still in flight
+local busy: { [number]: number } = {}
+--- user id -> a write failed since the record was last read or written: what this server holds may
+--- not be what is stored (Purchases.use keeps a spend before it is stored)
+local doubt: { [number]: boolean } = {}
+
+--- Every write to a record: UpdateAsync on its key, counted while in flight. Errors as UpdateAsync does.
+local function update(user_id: number, fn: (any) -> any): any
+	busy[user_id] = (busy[user_id] or 0) + 1
+	local ok, res = pcall(function()
+		return deps.datastore:UpdateAsync("u" .. tostring(user_id), fn)
+	end)
+	local n = (busy[user_id] or 1) - 1
+	busy[user_id] = if n > 0 then n else nil
+	if not ok then
+		doubt[user_id] = true
+		error(res, 0)
+	end
+	doubt[user_id] = nil
+	return res
+end
 
 function Purchases.configure(d: { [string]: any })
 	for k, v in d do
@@ -123,6 +153,11 @@ function Purchases.reset()
 	table.clear(cache)
 	table.clear(inv)
 	table.clear(loading)
+	table.clear(records)
+	table.clear(busy)
+	table.clear(doubt)
+	Purchases.lost.payouts = 0
+	Purchases.lost.stars = 0
 end
 
 --- The credit kind a product grants (nil: not ours), and how many of it (the 3-crate pack: 3).
@@ -250,6 +285,7 @@ end
 
 local function remember(player: any, rec: Record)
 	loading[player] = nil -- (the record is here: a load still retrying has nothing left to do)
+	records[player] = rec
 	cache[player] = rec.credits
 	inv[player] = {
 		owned = rec.owned,
@@ -371,7 +407,7 @@ function Purchases.starter_seen(player: any): boolean
 	local started = false
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			started = false
 			local rec = clean(old, player.UserId)
 			stored = rec
@@ -443,7 +479,7 @@ function Purchases.grant(user_id: number, kind: string, receipt: string, n: numb
 	local stored: Record? = nil
 	local refused = false
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(user_id), function(old: any): any
+		update(user_id, function(old: any): any
 			refused = false
 			local rec = clean(old, user_id)
 			if table.find(rec.receipts, receipt) then
@@ -549,9 +585,22 @@ end
 
 --- Yields: LOAD_ATTEMPTS reads with LOAD_BACKOFF between them, then, with the session already going
 --- on an empty record, more every LOAD_RETRY_S (deps.wait; without one, a single attempt).
+--- A player teleported here by a server of ours comes with the record that server held when they left
+--- (deps.arrived: server/Handoff); then nothing is read.
 function Purchases.load(player: any)
 	local token = {}
 	loading[player] = token
+	if deps.arrived then
+		local ok, got = pcall(deps.arrived, player)
+		if loading[player] ~= token then
+			return
+		end
+		if ok and type(got) == "table" and type(got.p) == "table" then
+			remember(player, clean(got.p, player.UserId))
+			notify(player)
+			return
+		end
+	end
 	local wait = deps.wait
 	local tries = 0
 	while true do
@@ -603,7 +652,7 @@ function Purchases.use(player: any, kind: string): (boolean, string?)
 	local spent = false
 	local left: { [string]: number }? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			spent = false
 			local rec = clean(old, player.UserId)
 			left = rec.credits
@@ -634,6 +683,48 @@ function Purchases.release(player: any)
 	loading[player] = nil
 	cache[player] = nil
 	inv[player] = nil
+	records[player] = nil
+	doubt[player.UserId] = nil
+end
+
+--- A player leaving for another server of ours (server/Handoff): waits, at most `max_s`, for this
+--- server's writes to their record to land (a match's Stars are often still being paid), then returns
+--- the record as it now stands; nil when it isn't known for sure (never read, still loading, a write
+--- that failed or hasn't landed): the next server reads the store. Yields. Call before release.
+function Purchases.settle(player: any, max_s: number): any
+	local uid = player.UserId
+	local waited = 0
+	while busy[uid] ~= nil and deps.wait ~= nil and waited < max_s do
+		waited += 0.1
+		deps.wait(0.1)
+	end
+	if busy[uid] ~= nil or doubt[uid] or loading[player] ~= nil or inv[player] == nil then
+		return nil
+	end
+	return records[player]
+end
+
+--- What a write error was, in a word (for the warning the error report counts).
+local function reason(err: any): string
+	local text = tostring(err)
+	for _, word in { "TooManyRequests", "InternalServerError", "ServiceUnavailable", "Throttled", "queue was full" } do
+		if string.find(text, word, 1, true) then
+			return word
+		end
+	end
+	return "other"
+end
+
+--- Stars that could not be paid after every retry (2026-11-03: the error report showed the store
+--- refusing requests, not whether a payout was lost in the end). The server log has who and how many;
+--- the warning is worded the same each time so the error report counts them by kind and reason.
+local function stars_lost(user_id: number, amount: number, what: string, err: any)
+	Purchases.lost.payouts += 1
+	Purchases.lost.stars += amount
+	log(string.format("could not pay %d %s Stars to %d: %s", amount, what, user_id, tostring(err)))
+	if deps.warn then
+		deps.warn(string.format("[Purchases] %s Stars lost after every retry (%s)", what, reason(err)))
+	end
 end
 
 --- Open one crate: spend a crate credit and add an item the player doesn't own (Cosmetics.roll, the
@@ -645,7 +736,7 @@ function Purchases.open_crate(player: any): (boolean, string?)
 	local why = "no crate"
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			got = nil
 			local rec = clean(old, player.UserId)
 			stored = rec
@@ -695,7 +786,7 @@ function Purchases.equip(player: any, slot: string, id: any): (boolean, string?)
 	local done = false
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			done = false
 			local rec = clean(old, player.UserId)
 			stored = rec
@@ -727,7 +818,7 @@ function Purchases.tutorial_bonus(player: any, amount: number): boolean
 	local stored: Record? = nil
 	local paid = false
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			local rec = clean(old, player.UserId)
 			stored = rec
 			if rec.tutorial_paid then
@@ -742,7 +833,7 @@ function Purchases.tutorial_bonus(player: any, amount: number): boolean
 		end)
 	end)
 	if not ok or stored == nil then
-		log("could not pay the tutorial's Stars to " .. tostring(player.UserId) .. ": " .. tostring(err))
+		stars_lost(player.UserId, add, "tutorial", err)
 		return false
 	end
 	remember(player, stored :: Record)
@@ -762,7 +853,7 @@ function Purchases.general_perks(player: any, day: number, skin: string?, crates
 	local stored: Record? = nil
 	local given: any = {}
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			local rec = clean(old, player.UserId)
 			stored = rec
 			given = {}
@@ -809,7 +900,7 @@ end
 function Purchases.reset_new_player(player: any, keep_owned: boolean?): boolean
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			local rec = clean(old, player.UserId)
 			rec.tutorial_paid = nil
 			rec.crates_bought = 0
@@ -840,7 +931,7 @@ function Purchases.add_stars(player: any, amount: number): (boolean, number)
 	end
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			local rec = clean(old, player.UserId)
 			rec.stars = math.min(rec.stars + add, Purchases.MAX_STARS)
 			rec.stars_earned = math.min(rec.stars_earned + add, Purchases.MAX_STARS)
@@ -849,7 +940,7 @@ function Purchases.add_stars(player: any, amount: number): (boolean, number)
 		end)
 	end)
 	if not ok or stored == nil then
-		log("could not pay " .. tostring(add) .. " Stars to " .. tostring(player.UserId) .. ": " .. tostring(err))
+		stars_lost(player.UserId, add, "match", err)
 		return false, Purchases.stars(player)
 	end
 	remember(player, stored :: Record)
@@ -871,7 +962,7 @@ function Purchases.buy_unlock(player: any, item_key: any): (boolean, string?)
 	local done = false
 	local stored: Record? = nil
 	local ok, err = pcall(function()
-		deps.datastore:UpdateAsync(key(player.UserId), function(old: any): any
+		update(player.UserId, function(old: any): any
 			done = false
 			local rec = clean(old, player.UserId)
 			stored = rec

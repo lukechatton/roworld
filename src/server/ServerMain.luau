@@ -46,6 +46,7 @@ local Analytics = require(script.Parent.Analytics) :: any
 local ServerPerf = require(script.Parent.ServerPerf) :: any
 local AdminCheck = require(script.Parent.AdminCheck) :: any
 local DsGate = require(script.Parent.DsGate) :: any
+local Handoff = require(script.Parent.Handoff) :: any
 local Purchases = require(script.Parent.Purchases) :: any
 local Rewards = require(script.Parent.Rewards) :: any
 local General = require(script.Parent.General) :: any
@@ -290,7 +291,32 @@ function ServerMain.start()
 		end
 	end
 	ServerMain.lobby_store = store
-	local teleports = Teleports.for_place(game.PlaceId)
+	-- What this server knew of a player follows them on its teleports (Handoff): the server they arrive
+	-- on doesn't read their settings and Purchases record from the DataStores again.
+	local handoff_map: any = nil
+	pcall(function()
+		handoff_map = game:GetService("MemoryStoreService"):GetHashMap(Handoff.MAP)
+	end)
+	local handoff = Handoff.new({
+		map = handoff_map,
+		guid = function(): string
+			return HttpService:GenerateGUID(false)
+		end,
+		join_data = function(player: Player): any
+			return player:GetJoinData()
+		end,
+		encode = function(v: any): string
+			return HttpService:JSONEncode(v)
+		end,
+		spawn = task.spawn,
+		wait = task.wait,
+		now = os.clock,
+		log = print,
+	})
+	ServerMain.handoff = handoff
+	local teleports = Teleports.for_place(game.PlaceId, function(players: { Player }, data: any): any
+		return handoff:stamp(players, data)
+	end)
 	local function lobby_maps(): { any }
 		local out = {}
 		for _, m in MapList.maps do
@@ -934,10 +960,10 @@ function ServerMain.start()
 					local ok, err = pcall(function()
 						local opts = Instance.new("TeleportOptions")
 						opts.ServerInstanceId = target
-						opts:SetTeleportData({
+						opts:SetTeleportData(handoff:stamp({ player }, {
 							hop = true,
 							solo = { d = math.clamp(math.floor(difficulty), 0, 2), m = map_id },
-						})
+						}))
 						game:GetService("TeleportService"):TeleportAsync(game.PlaceId, { player }, opts)
 					end)
 					going = ok
@@ -1384,9 +1410,19 @@ function ServerMain.start()
 		end,
 		wait = task.wait,
 		log = print,
+		warn = warn,
+		-- teleported here by a server of ours: the record it held when they left
+		arrived = function(player: Player): any
+			return handoff:arrived(player)
+		end,
 		-- (Studio: the starter pack is offered before its product exists; the prompt is a test)
 		studio = RunService:IsStudio(),
 	})
+	SettingsStore.connect_handoff(function(player: Player): any
+		return handoff:arrived(player)
+	end, function(player: Player, settings: any)
+		handoff:part(player, "s", settings)
+	end)
 	-- Stars for matches (shared/Data/Stars): public matches as this server measured them, solo
 	-- matches on the client's report within what the clock allows
 	Rewards.configure({
@@ -1489,7 +1525,15 @@ function ServerMain.start()
 		policy_known[player] = nil
 		General.release(player)
 		Rewards.release(player)
-		Purchases.release(player)
+		if handoff:leaving(player) then
+			-- on one of our teleports: their record goes along once this server's writes have landed
+			task.spawn(function()
+				handoff:part(player, "p", Purchases.settle(player, Handoff.PART_WAIT_S - 5))
+				Purchases.release(player)
+			end)
+		else
+			Purchases.release(player)
+		end
 		pcall(Analytics.left, player)
 		hello_at[player] = nil
 		joining_lobby[player] = nil
@@ -1532,6 +1576,8 @@ function ServerMain.start()
 	local studio_beat = 0.0
 	local perf = ServerPerf.new()
 	local StatsService = game:GetService("Stats")
+	--- the counts at the last report (each report has the window's)
+	local counted = { hits = 0, misses = 0, none = 0, sent = 0, lost = 0, lost_stars = 0 }
 	--- What this server runs, for its ServerPerf report.
 	local function perf_context(): { [string]: any }
 		local ctx: { [string]: any } = {
@@ -1542,7 +1588,17 @@ function ServerMain.start()
 			mem_mb = StatsService:GetTotalMemoryUsageMb(),
 			age_min = time() / 60,
 			version = game.PlaceVersion,
+			-- players who came with their records (Handoff) and who had to read the DataStores, records
+			-- handed on, and Stars that could not be paid
+			handoff_hits = handoff.hits - counted.hits,
+			handoff_misses = handoff.misses - counted.misses,
+			handoff_none = handoff.none - counted.none,
+			handoff_sent = handoff.sent - counted.sent,
+			stars_lost = Purchases.lost.payouts - counted.lost,
+			stars_lost_amount = Purchases.lost.stars - counted.lost_stars,
 		}
+		counted.hits, counted.misses, counted.none, counted.sent = handoff.hits, handoff.misses, handoff.none, handoff.sent
+		counted.lost, counted.lost_stars = Purchases.lost.payouts, Purchases.lost.stars
 		local sim = server:sim()
 		if sim ~= nil then
 			ctx.minute = sim.tick * MatchServer.TICK_SEC / 60

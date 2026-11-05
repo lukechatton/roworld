@@ -31,6 +31,15 @@ export interface PerfReport {
 	memMb: number;
 	ageMin: number;
 	version: number;
+	// the minute's joins (server/Handoff): with the records the last server handed on, without them
+	// (its entry didn't come), and not from one of our teleports; records handed on; Stars that could
+	// not be paid after every retry (2026-11-03)
+	handoffHits: number;
+	handoffMisses: number;
+	handoffNone: number;
+	handoffSent: number;
+	starsLost: number;
+	starsLostAmount: number;
 }
 
 const WORD_RE = /^[0-9A-Za-z_.:-]{1,32}$/;
@@ -66,6 +75,12 @@ export function parseReport(v: unknown): PerfReport {
 		memMb: n("mem_mb", 1e6),
 		ageMin: n("age_min", 1e7),
 		version: n("version", 1e7),
+		handoffHits: int(o.handoff_hits ?? 0, "perf.handoff_hits", 0, 1e6),
+		handoffMisses: int(o.handoff_misses ?? 0, "perf.handoff_misses", 0, 1e6),
+		handoffNone: int(o.handoff_none ?? 0, "perf.handoff_none", 0, 1e6),
+		handoffSent: int(o.handoff_sent ?? 0, "perf.handoff_sent", 0, 1e6),
+		starsLost: int(o.stars_lost ?? 0, "perf.stars_lost", 0, 1e6),
+		starsLostAmount: int(o.stars_lost_amount ?? 0, "perf.stars_lost_amount", 0, 1e9),
 	};
 }
 
@@ -89,6 +104,16 @@ export interface PerfSample {
 	matches: number;
 	slowHubs: number; // under SLOW_FPS
 	slowMatches: number;
+	// the counts below summed over the servers' latest minutes (absent in samples before 2026-11-03)
+	handoff?: HandoffCounts;
+	starsLost?: { payouts: number; stars: number };
+}
+
+export interface HandoffCounts {
+	hits: number;
+	misses: number;
+	none: number;
+	sent: number;
 }
 
 export class Perf {
@@ -138,6 +163,8 @@ export class Perf {
 		servers: number;
 		byRole: Record<string, number>;
 		bands: Record<string, Record<string, number>>;
+		handoff: HandoffCounts;
+		starsLost: { payouts: number; stars: number };
 		slowest: (PerfReport & { job: string })[];
 	} {
 		const live = this.live();
@@ -148,15 +175,16 @@ export class Perf {
 			byRole[r.role]++;
 			bands[r.role][fpsBand(r.fps)]++;
 		}
+		const { handoff, starsLost } = totals(live.map(([, r]) => r));
 		live.sort((a, b) => a[1].fps - b[1].fps);
 		const slowest = live.slice(0, top).map(([job, r]) => ({ job: job.slice(0, 8), ...r }));
-		return { servers: live.length, byRole, bands, slowest };
+		return { servers: live.length, byRole, bands, handoff, starsLost, slowest };
 	}
 
 	/** One history point (main.ts: every minute). */
 	sample(): PerfSample {
 		const live = this.live();
-		const s: PerfSample = { t: Math.floor(this.now()), hubs: 0, matches: 0, slowHubs: 0, slowMatches: 0 };
+		const s: PerfSample = { t: Math.floor(this.now()), hubs: 0, matches: 0, slowHubs: 0, slowMatches: 0, ...totals(live.map(([, r]) => r)) };
 		for (const [, r] of live) {
 			const slow = r.fps < Perf.SLOW_FPS;
 			if (r.role === "match") {
@@ -181,6 +209,21 @@ export class Perf {
 		for (const s of list) if (s && typeof s.t === "number" && s.t >= cutoff) this.samples.push(s);
 		this.samples.sort((a, b) => a.t - b.t);
 	}
+}
+
+/** The servers' latest minutes added up: hand-offs and lost Stars. */
+function totals(reports: PerfReport[]): { handoff: HandoffCounts; starsLost: { payouts: number; stars: number } } {
+	const handoff: HandoffCounts = { hits: 0, misses: 0, none: 0, sent: 0 };
+	const starsLost = { payouts: 0, stars: 0 };
+	for (const r of reports) {
+		handoff.hits += r.handoffHits;
+		handoff.misses += r.handoffMisses;
+		handoff.none += r.handoffNone;
+		handoff.sent += r.handoffSent;
+		starsLost.payouts += r.starsLost;
+		starsLost.stars += r.starsLostAmount;
+	}
+	return { handoff, starsLost };
 }
 
 /** A slow report as one log line. */

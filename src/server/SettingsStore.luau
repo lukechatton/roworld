@@ -16,6 +16,8 @@
 --     flight, so they can't land out of order), and `dirty` is cleared only when a write succeeded;
 --   * leave and shutdown flush what is pending (shutdown waits for every write, bounded).
 -- Without DataStore access (Studio without API access, guests) it works in memory for the session.
+-- A player teleported here by a server of ours comes with the settings that server held when they left
+-- (server/Handoff, 2026-11-03): nothing is read.
 --
 -- The Roblox services are injectable (SettingsStore.configure) so tests drive it headless.
 
@@ -160,6 +162,22 @@ function SettingsStore.load(player: any)
 	}
 	entries[player] = e
 	deps.spawn(function()
+		-- teleported here by a server of ours: the settings it held when they left (server/Handoff)
+		if deps.arrived then
+			local ok, got = pcall(deps.arrived, player)
+			if entries[player] ~= e then
+				return
+			end
+			if ok and type(got) == "table" and type(got.s) == "table" then
+				local handed = SettingsMod.clean_all(got.s)
+				for section, values in e.data do
+					handed[section] = values
+				end
+				e.data = handed
+				release_waiters(e)
+				return
+			end
+		end
 		local key = key_for(player)
 		local ds = if key then get_store() else nil
 		if ds and key then
@@ -360,14 +378,26 @@ function SettingsStore.flush(force: boolean?)
 	end
 end
 
+--- What a leaving player's settings are, for the next server (deps.parting): only when this session's
+--- copy is what is stored (read whole, every change written).
+local function parting(player: any, e: Entry?)
+	if deps.parting == nil then
+		return
+	end
+	local known = e ~= nil and e.loaded and not e.load_failed and not e.dirty
+	pcall(deps.parting, player, if known then SettingsMod.clean_all((e :: Entry).data) else nil)
+end
+
 --- The player left: forget the entry and write what is pending (after a write already in flight).
 function SettingsStore.release(player: any)
 	local e = entries[player]
 	if e == nil then
+		parting(player, nil)
 		return
 	end
 	entries[player] = nil
 	if not e.dirty then
+		parting(player, e)
 		return
 	end
 	deps.spawn(function()
@@ -384,7 +414,16 @@ function SettingsStore.release(player: any)
 			end
 			deps.wait(2.0)
 		end
+		parting(player, e)
 	end)
+end
+
+--- The handoff between servers (server/Handoff): `arrived(player) -> { s = settings? }?` is asked
+--- before the DataStore read of a joining player; `parting(player, settings?)` hears a leaving
+--- player's settings once their last write landed (nil: not known for sure).
+function SettingsStore.connect_handoff(arrived: (any) -> any, part: (any, any) -> ())
+	deps.arrived = arrived
+	deps.parting = part
 end
 
 --- True when the player's stored settings could not be read: what this session holds is not what
