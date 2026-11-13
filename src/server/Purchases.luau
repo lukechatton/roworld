@@ -197,6 +197,15 @@ local function owed_stored(user_id: number, entries: { any })
 	end
 end
 
+--- Yields (at most `max_s`, and only with deps.wait) while a write to `user_id`'s record is in flight.
+local function writes_done(user_id: number, max_s: number)
+	local waited = 0
+	while busy[user_id] ~= nil and deps.wait ~= nil and waited < max_s do
+		waited += 0.1
+		deps.wait(0.1)
+	end
+end
+
 --- Every write to a record: UpdateAsync on its key, one at a time per record from this server, counted
 --- while in flight, and carrying the player's owed payouts. Errors as UpdateAsync does.
 local function update(user_id: number, fn: (any) -> any): any
@@ -1000,11 +1009,20 @@ function Purchases.release(player: any)
 	doubt[player.UserId] = nil
 	key_writes[player.UserId] = nil
 	if owed[player.UserId] ~= nil then
+		-- A payout's write may still be in flight (most often: they closed the game as their match
+		-- ended). Wait for it, so only what it didn't store is kept for later: v117 kept 15 of its first
+		-- 92 payouts that way though they were stored, and the next server showed them twice until its
+		-- write. (A teleport of ours waited already: ServerMain settles before leave_owed.)
+		local uid = player.UserId
+		local function keep()
+			writes_done(uid, Purchases.KEY_WAIT_S)
+			Purchases.leave_owed(player)
+		end
 		local spawn = spawn_fn()
 		if spawn ~= nil then
-			spawn(Purchases.leave_owed, player)
+			spawn(keep)
 		else
-			Purchases.leave_owed(player)
+			keep()
 		end
 	end
 end
@@ -1034,11 +1052,7 @@ end
 --- that failed or hasn't landed): the next server reads the store. Yields. Call before release.
 function Purchases.settle(player: any, max_s: number): any
 	local uid = player.UserId
-	local waited = 0
-	while busy[uid] ~= nil and deps.wait ~= nil and waited < max_s do
-		waited += 0.1
-		deps.wait(0.1)
-	end
+	writes_done(uid, max_s)
 	if busy[uid] ~= nil or doubt[uid] or loading[player] ~= nil or inv[player] == nil then
 		return nil
 	end

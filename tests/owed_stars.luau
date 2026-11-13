@@ -236,6 +236,43 @@ run(t + 2)
 expect(rows.u202.stars == 75, "and not paid again on the server after")
 Purchases.release(Q3)
 
+print("leaving while a payout's write is in flight: stored, not kept for later")
+-- (v117's first minutes: 15 of 92 payouts kept in MemoryStore though their write landed)
+local V = { UserId = 252 }
+rows.u252 = { stars = 10 }
+go(function()
+	Purchases.load(V)
+end)
+Purchases.take_stats()
+spawn(function()
+	Purchases.add_stars(V, 40)
+end)
+run(t + 0.1) -- (the write is in the store now)
+Purchases.release(V)
+run(t + 2)
+expect(rows.u252.stars == 50, "the write landed")
+expect(mem.u252 == nil, "nothing kept in MemoryStore")
+local vs = Purchases.take_stats()
+expect(vs.owed_kept == 0 and vs.owed_new == 0, "nothing counted as kept or owed")
+
+print("leaving while a payout's write is in flight, and it fails: kept for later")
+local V2 = { UserId = 253 }
+rows.u253 = { stars = 10 }
+go(function()
+	Purchases.load(V2)
+end)
+refuse = 1
+spawn(function()
+	Purchases.add_stars(V2, 40)
+end)
+run(t + 0.1)
+Purchases.release(V2)
+run(t + 2)
+refuse = 0
+expect(rows.u253.stars == 10, "not stored")
+expect(type(mem.u253) == "table" and #mem.u253 == 1 and mem.u253[1].stars == 40, "kept in MemoryStore")
+expect(Purchases.take_stats().owed_kept == 1, "counted as kept")
+
 print("a handoff says whether to look")
 local R = { UserId = 303 }
 rows.u303 = { stars = 0 }
