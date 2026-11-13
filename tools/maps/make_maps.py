@@ -27,7 +27,17 @@ already placed:
   - a continent: its countries (those of `continents`, Natural Earth's CONTINENT) by population, then
     the states / provinces of the big countries it splits (`split`; Russia's west or east of the Urals,
     `split_lon`), the farthest from those placed first, up to `nations`; none smaller than MIN_ROOM *
-    min_gap^2 tiles (a microstate, a city), no name twice.
+    min_gap^2 tiles (a microstate, a city), no name twice;
+  - a region (a map of a sea or of one country): the same, with `countries` (ISO-2 codes) in place of
+    `continents`: only those countries count, whatever their continent, so a neighbour's land inside
+    the window stays unclaimed (the United States map's Canada and Mexico); `exclude`: names that get no
+    start on this map (their land is their neighbours' room); a split country in `keep`
+    keeps a start of its own name as well, at its label point or at `starts` (lon, lat: where the label
+    point is outside the window or deep in a desert the map hardly shows); `regions` (name, flag, lon,
+    lat) join the provinces where a country's own are too few for its land (Australia's 7 states, which
+    `first` places before them, biggest first, right after the countries); `names` renames a province
+    whose name says too little alone; `edge`: no province or region starts closer than that many tiles
+    to the window's edge.
 
 Usage (from the repo root): .venv/bin/python tools/maps/make_maps.py [--src build/worldsrc] [--only europe]
     [--preview <dir>]
@@ -49,8 +59,13 @@ from scipy.io import netcdf_file
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SS = 3  # sample points per tile side
 # left out: names Roblox's text moderation may flag (2026-09-26), as before; a disputed territory and
-# provinces whose name or flag takes a side or reads badly as a nation (2026-10-26, the continent maps)
-EXCLUDED_NATIONS = {"Niger", "Western Sahara", "Autonomous Republic of Crimea", "Sevastopol", "Jewish"}
+# provinces whose name or flag takes a side or reads badly as a nation (2026-10-26, the continent maps);
+# the sides of a live war, a province named for a people's claimed state, Islam's holy cities and Darfur
+# (a name for genocide) as nations to conquer (2026-11-13, the Mediterranean and Middle East maps: their
+# land stays unclaimed; "West Soudan" is Natural Earth's West Darfur)
+EXCLUDED_NATIONS = {"Niger", "Western Sahara", "Autonomous Republic of Crimea", "Sevastopol", "Jewish",
+                    "Israel", "Palestine", "Kurdistan", "Makkah", "Al Madinah", "North Darfur",
+                    "South Darfur", "East Darfur", "West Soudan", "Central Darfur"}
 NAMES = {  # Natural Earth's NAME_LONG -> the name shown in game
     "Russian Federation": "Russia",
     "Republic of Korea": "South Korea",
@@ -101,30 +116,82 @@ WORLD_LAT_TOP = 90.0 - 10 / (2000 / 360.0)
 # global file), the registry's fields, the nations and how they are chosen.
 MAPS = [
     dict(id="world", name="World", module="World", world=True, width=2000, height=1000,
-         lon0=WORLD_LON0, lat_top=WORLD_LAT_TOP, ppd=2000 / 360.0, lat_std=0.0, lakes=3,
+         lon0=WORLD_LON0, lat_top=WORLD_LAT_TOP, ppd=2000 / 360.0, lat_std=0.0, lakes=3, big_lakes=False,
          categories=["featured", "world"], frequency=30, modifiers=["isCrowded:50"],
          nations=71, min_gap=30),
     dict(id="europe", name="Europe", module="Europe", lon0=-25.0, lon1=45.0, lat_top=72.0, lat_bottom=34.0,
-         ppd=33.0, lat_std=52.0, etopo_step=1, lakes=9,
+         ppd=33.0, lat_std=52.0, etopo_step=1, lakes=9, big_lakes=False,
          categories=["featured", "continental", "europe"], frequency=10, modifiers=[],
          nations=48, min_gap=55, split=["ru"], continents=["Europe", "Asia"], split_lon={"ru": (-180, 60)}),
     dict(id="northamerica", name="North America", module="NorthAmerica", lon0=-170.0, lon1=-50.0,
-         lat_top=75.0, lat_bottom=7.0, ppd=18.0, lat_std=40.0, etopo_step=2, lakes=9,
+         lat_top=75.0, lat_bottom=7.0, ppd=18.0, lat_std=40.0, etopo_step=2, lakes=9, big_lakes=False,
          categories=["featured", "continental", "north_america"], frequency=10, modifiers=[],
          nations=50, min_gap=55, split=["us", "ca", "mx"], continents=["North America"]),
     dict(id="southamerica", name="South America", module="SouthAmerica", lon0=-92.0, lon1=-30.0,
-         lat_top=14.0, lat_bottom=-57.0, ppd=20.0, lat_std=-20.0, etopo_step=2, lakes=9,
+         lat_top=14.0, lat_bottom=-57.0, ppd=20.0, lat_std=-20.0, etopo_step=2, lakes=9, big_lakes=False,
          categories=["featured", "continental", "south_america"], frequency=10, modifiers=[],
          nations=36, min_gap=55, split=["br", "ar", "co", "pe", "ve", "bo"], continents=["South America"]),
     dict(id="asia", name="Asia", module="Asia", lon0=25.0, lon1=150.0, lat_top=78.0, lat_bottom=-12.0,
-         ppd=15.0, lat_std=35.0, etopo_step=2, lakes=9,
+         ppd=15.0, lat_std=35.0, etopo_step=2, lakes=9, big_lakes=False,
          categories=["featured", "continental", "asia"], frequency=10, modifiers=[],
          nations=64, min_gap=50, split=["ru", "cn", "in", "kz", "id", "mn"], continents=["Asia"],
          split_lon={"ru": (60, 180)}),
     dict(id="africa", name="Africa", module="Africa", lon0=-26.0, lon1=58.0, lat_top=38.0, lat_bottom=-36.0,
-         ppd=18.0, lat_std=10.0, etopo_step=2, lakes=9,
+         ppd=18.0, lat_std=10.0, etopo_step=2, lakes=9, big_lakes=False,
          categories=["featured", "continental", "africa"], frequency=10, modifiers=[],
          nations=50, min_gap=40, split=[], continents=["Africa"]),
+    # The 48 contiguous states (Alaska and Hawaii are too far for one window); the strips of Canada and
+    # Mexico inside it are land with no nation.
+    dict(id="unitedstates", name="United States", module="UnitedStates", lon0=-126.0, lon1=-65.5,
+         lat_top=51.0, lat_bottom=24.0, ppd=34.0, lat_std=38.0, etopo_step=1, lakes=9,
+         categories=["regional", "north_america"], frequency=10, modifiers=[],
+         nations=44, min_gap=28, split=["us"], countries=["us"],
+         # (owner, 2026-11-13: the smallest states' land is their neighbours' room)
+         exclude=["Rhode Island", "Delaware", "Connecticut", "Massachusetts"]),
+    # The sea and the countries on its shores (with Portugal, Jordan and the Black Sea's Balkan shore);
+    # the land of others inside the window has no nation.
+    dict(id="mediterranean", name="Mediterranean", module="Mediterranean", lon0=-10.0, lon1=42.0,
+         lat_top=47.0, lat_bottom=28.0, ppd=42.0, lat_std=40.0, etopo_step=1, lakes=9,
+         categories=["regional", "europe", "africa"], frequency=10, modifiers=[],
+         nations=48, min_gap=50, edge=25, split=["es", "fr", "it", "tr", "dz", "ly", "eg"],
+         exclude=["Balearic Islands", "Cyprus"],  # (owner, 2026-11-13: islands to take, not starts)
+         keep=["es", "fr", "it", "tr", "dz", "ly", "eg"],
+         starts={"fr": (2.5, 45.2), "dz": (3.0, 35.9), "ly": (13.8, 31.6), "eg": (30.8, 30.1)},
+         countries=["pt", "es", "fr", "it", "si", "hr", "ba", "me", "al", "gr", "mk", "bg", "ro", "rs", "tr",
+                    "cy", "sy", "lb", "jo", "eg", "ly", "tn", "dz", "ma", "mt"]),
+    # Egypt to Iran, Türkiye to Yemen and Oman, with Sudan and Eritrea (else a quarter of the land, south
+    # of Egypt, has no nation); the big ones split into provinces, each keeping a start of its own name;
+    # the Caucasus, Central Asia and the others at the window's edges unclaimed.
+    dict(id="middleeast", name="Middle East", module="MiddleEast", lon0=24.5, lon1=63.5,
+         lat_top=42.5, lat_bottom=12.0, ppd=32.0, lat_std=28.0, etopo_step=1, lakes=9,
+         categories=["regional", "asia"], frequency=10, modifiers=[],
+         nations=48, min_gap=60, edge=25, split=["tr", "eg", "sa", "ir", "sd"],
+         keep=["tr", "eg", "sa", "ir", "sd"], names={"Northern": "Northern State", "Eastern": "Eastern Province"},
+         countries=["tr", "cy", "sy", "lb", "jo", "iq", "sa", "ye", "om", "ae", "qa", "kw", "bh", "eg", "ir",
+                    "sd", "er"]),
+    # Australia, New Zealand, New Guinea, Indonesia (with Malaysia's half of Borneo and its peninsula) and
+    # the Pacific islands as far as Fiji (Samoa and Tonga, past 180°, are too small anyway). New Caledonia
+    # is left out: its flag here is the Kanak flag, one side of its independence question.
+    dict(id="oceania", name="Oceania", module="Oceania", lon0=94.5, lon1=180.0,
+         lat_top=6.5, lat_bottom=-47.8, ppd=22.0, lat_std=-25.0, etopo_step=2, lakes=9,
+         categories=["regional", "oceania"], frequency=10, modifiers=[],
+         nations=42, min_gap=45, edge=20, split=["au", "id", "nz", "my"], keep=["au", "id", "nz", "my"],
+         # (owner, 2026-11-13: no start with under 1k tiles of land, their islands are there to take; and
+         # North Sulawesi, which would then take Gorontalo's place on the approved list)
+         exclude=["Fiji", "Solomon Islands", "Vanuatu", "North Maluku", "West Nusa Tenggara",
+                  "East Nusa Tenggara", "North Sulawesi"],
+         first=["au"], starts={"my": (102.3, 3.7)},
+         countries=["au", "id", "nz", "pg", "tl", "fj", "sb", "vu", "my", "bn"],
+         # (Australia's own regions and deserts: its 7 states alone would leave 70% of the land to 8 starts)
+         regions=[(name, "au", lon, lat) for name, lon, lat in [
+             ("Kimberley", 126.0, -17.0), ("Pilbara", 119.5, -22.3), ("Gascoyne", 115.8, -25.0),
+             ("Goldfields", 122.5, -30.0), ("Wheatbelt", 117.5, -31.5), ("Great Sandy Desert", 124.5, -20.8),
+             ("Gibson Desert", 125.0, -24.3), ("Great Victoria Desert", 128.5, -28.3),
+             ("Nullarbor", 129.5, -30.8), ("Top End", 132.5, -13.8), ("Tanami Desert", 130.5, -19.5),
+             ("Barkly", 135.8, -18.8), ("Simpson Desert", 137.2, -25.2), ("Eyre Peninsula", 135.6, -33.2),
+             ("Cape York", 142.9, -14.5), ("Gulf Country", 140.5, -18.3), ("Channel Country", 141.5, -25.0),
+             ("Central Queensland", 148.0, -23.3), ("New England", 151.3, -30.3), ("Riverina", 146.0, -34.6),
+             ("Gippsland", 147.6, -37.7)]]),
 ]
 NE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/"
 ERDDAP = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/etopo180.nc"
@@ -237,8 +304,13 @@ def land_samples(src, proj, spec):
     land = sorted(polygons(os.path.join(src, "ne_10m_land.geojson")), key=lambda p: -ring_area(p[1][0]))
     for _, rings in land:
         draw_rings(proj, draw, rings, 1, 0)
-    lakes = [p for p in polygons(os.path.join(src, "ne_10m_lakes.geojson"))
-             if (p[0].get("scalerank") or 99) <= spec["lakes"]]
+    def rank(props):
+        # Natural Earth ranks the biggest lakes 0; the maps built before 2026-11-13 read that as unranked
+        # and left them out, and keep doing so (`big_lakes=False`) until rebuilt on purpose
+        r = props.get("scalerank")
+        return 99 if r is None or (r == 0 and not spec.get("big_lakes", True)) else r
+
+    lakes = [p for p in polygons(os.path.join(src, "ne_10m_lakes.geojson")) if rank(p[0]) <= spec["lakes"]]
     for _, rings in sorted(lakes, key=lambda p: -ring_area(p[1][0])):
         draw_rings(proj, draw, rings, 0, 1)
     out = np.array(img, dtype=bool)
@@ -481,23 +553,49 @@ def pick_nations(src, proj, grid, spec):
         return picked
     split = set(spec.get("split", []))
     continents = set(spec.get("continents") or [])
+    only = set(spec.get("countries") or [])
+    keep = set(spec.get("keep") or [])
+    starts = spec.get("starts") or {}
+    exclude = set(spec.get("exclude") or [])  # (this map's own: names that get no start here)
     room = MIN_ROOM * spec["min_gap"] ** 2 / (proj.px * proj.py)  # square degrees
     for _, name, flag, lon, lat, continent, area in rows:
-        if flag in split or (continents and continent not in continents) or area < room:
+        if only:
+            if flag not in only:
+                continue
+        elif continents and continent not in continents:
             continue
+        if (flag in split and flag not in keep) or area < room or name in exclude:
+            continue
+        lon, lat = starts.get(flag, (lon, lat))
         spot = place(proj, grid, lon, lat)
         if spot is None or not free(spot):
             continue
         picked.append({"name": name, "flag": flag, "x": spot[0], "y": spot[1]})
         if len(picked) == count:
             return picked
-    # the big countries' states / provinces, the farthest from those placed first
-    pool = []
-    for name, flag, lon, lat, area in provinces(src, split, flags, spec.get("split_lon")):
-        if area < room or any(n["name"] == name for n in picked) or any(c[0] == name for c in pool):
+    edge = spec.get("edge", 0)
+
+    def inner(spot):
+        return edge <= min(spot[0], spot[1], proj.w - 1 - spot[0], proj.h - 1 - spot[1])
+
+    # the states / provinces of the `first` countries, biggest first (before the regions near them)
+    first = provinces(src, set(spec.get("first", [])), flags)
+    for name, flag, lon, lat, area in sorted(first, key=lambda p: -p[4]):
+        if area < room or len(picked) == count or name in exclude or any(n["name"] == name for n in picked):
             continue
         spot = place(proj, grid, lon, lat)
-        if spot is not None:
+        if spot is not None and free(spot) and inner(spot):
+            picked.append({"name": name, "flag": flag, "x": spot[0], "y": spot[1]})
+    # the big countries' states / provinces (and the map's regions), the farthest from those placed first
+    pool = []
+    extra = [(name, flag, lon, lat, math.inf) for name, flag, lon, lat in spec.get("regions", [])]
+    for name, flag, lon, lat, area in provinces(src, split, flags, spec.get("split_lon")) + extra:
+        name = spec.get("names", {}).get(name, name)
+        if area < room or name in exclude or any(n["name"] == name for n in picked) or any(
+                c[0] == name for c in pool):
+            continue
+        spot = place(proj, grid, lon, lat)
+        if spot is not None and inner(spot):
             pool.append((name, flag, spot))
     while pool and len(picked) < count:
         def space(c):

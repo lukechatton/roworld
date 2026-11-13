@@ -5,7 +5,11 @@ return {
 	africa = "rbxassetid://75475805071286",
 	asia = "rbxassetid://125565864168886",
 	europe = "rbxassetid://88867485196574",
+	mediterranean = "rbxassetid://135402980377600",
+	middleeast = "rbxassetid://81428661224953",
 	northamerica = "rbxassetid://124335844737055",
+	oceania = "rbxassetid://140489038995639",
 	southamerica = "rbxassetid://77554623776890",
+	unitedstates = "rbxassetid://136399319690560",
 	world = "rbxassetid://76456931670439",
 }

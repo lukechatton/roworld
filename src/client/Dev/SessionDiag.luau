@@ -75,7 +75,8 @@ function Diag.start(Main: any)
 		if op == "title" then
 			session:start_title()
 		elseif op == "solo" then
-			session:start_solo(tonumber(words[2]) or 1)
+			-- `solo <difficulty> [map id]`
+			session:start_solo(tonumber(words[2]) or 1, words[3])
 		elseif op == "spawn" then
 			if st == nil then
 				return "no state"
