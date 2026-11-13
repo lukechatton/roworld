@@ -352,6 +352,12 @@ function Telemetry.matches_before(self): number
 	return (base :: number) + n
 end
 
+--- The match being played, or the last one, was the player's first, and a solo one.
+function Telemetry.first_match(self): boolean
+	local m = self._match
+	return m ~= nil and m.first == true and not m.multi
+end
+
 --- "Replay as new player": no match counted again.
 function Telemetry.new_player(self)
 	self.matches_base = 0
@@ -463,9 +469,12 @@ function Telemetry.tick(self)
 				local d = math.clamp(tonumber(ctx.session and ctx.session.difficulty) or 1, 0, 2)
 				mode = "solo" .. tostring(math.floor(d))
 			end
+			-- (the player's first match: the NEXT MATCH screen follows it, UI/NextMatch)
+			local first = self:matches_before() == 0
 			m = {
 				state = st,
 				me = me,
+				first = first,
 				multi = sm == MODE_MULTI,
 				map = st.map_id,
 				minutes = 0.0,

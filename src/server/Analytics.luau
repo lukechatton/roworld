@@ -418,7 +418,8 @@ end
 --- "starter" ("shown" / "bought": the server; "opened" / "clicked": the client) ·
 --- "general" ("opened" (where) / "clicked" / "prompt_done": the client; "subscribed": the server) ·
 --- "flag_shop" ("opened" / "clicked" <key> / "clicked_pack" <set>: the client; "bought" <key> <Robux
---- spent> / "bought_pack" <set> <Robux spent>: the server).
+--- spent> / "bought_pack" <set> <Robux spent>: the server) · "next_match" ("shown" / "solo" / "public" /
+--- "back", from "first" | "preview": the client, UI/NextMatch).
 function Analytics.report(player: any, kind: any, a: any, b: any, c: any)
 	if type(kind) ~= "string" then
 		return
@@ -603,6 +604,18 @@ function Analytics.report(player: any, kind: any, a: any, b: any, c: any)
 		local names = deps.tutorial_steps or {}
 		local step = math.clamp(math.floor(tonumber(a) or 1), 1, math.max(#names - 2, 1))
 		custom(player, "Tutorial Skipped", 1, m, names[step + 1] or "Unknown")
+	elseif kind == "next_match" then
+		-- (client) NEXT MATCH (UI/NextMatch) after a first match: Shown, then Solo / Online / Results
+		-- (closed); the first match's mode and experience. The title menu's preview is not counted.
+		local what = if a == "shown"
+			then "Shown"
+			elseif a == "solo" then "Solo"
+			elseif a == "public" then "Online"
+			elseif a == "back" then "Results"
+			else nil
+		if what ~= nil and b == "first" then
+			custom(player, "Next Match", 1, m, what)
+		end
 	elseif kind == "hop" then
 		-- (the server) a solo start on an outdated server: Sent to a fresh one / None listed / Failed
 		custom(player, "Fresh Server Hop", 1, nil, if a == "sent" then "Sent" elseif a == "none" then "None" else "Failed")

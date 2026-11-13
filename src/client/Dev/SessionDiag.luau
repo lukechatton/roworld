@@ -1429,6 +1429,66 @@ function Diag.start(Main: any)
 			end
 			ui.ctx:world_call("focus_owner", { tonumber(words[2]) or st.local_owner })
 			return "focused"
+		elseif op == "next" then
+			-- NEXT MATCH (UI/NextMatch): `next` opens it as the title menu's preview; `next first` as
+			-- after a first match (its buttons then start what they say); `next close`
+			local ui = Main.ui
+			if ui == nil or ui.next_match == nil then
+				return "no ui"
+			end
+			if words[2] == "close" then
+				ui.next_match:close()
+				return "closed"
+			elseif words[2] == "menu" then
+				-- `next menu`: the title's settings window (the gear), where admins and Staging find
+				-- "Next-match screen"
+				ui:open_settings()
+				task.wait(0.5)
+				local b = ui.pause._next_preview
+				local r = b:get_global_rect()
+				return ("menu open=%s, button shown=%s at x %d..%d y %d..%d"):format(
+					tostring(ui.pause.is_open),
+					tostring(b:is_visible_in_tree()),
+					r.Min.X,
+					r.Max.X,
+					r.Min.Y,
+					r.Max.Y
+				)
+			elseif words[2] == "after" then
+				-- `next after`: in a solo match, as if it were the player's first and it ended now: the
+				-- results screen opens, and NEXT MATCH should follow it by itself
+				local m = ui.telemetry and ui.telemetry._match
+				if m == nil then
+					return "no match open"
+				end
+				m.first = true
+				m.multi = false
+				ui._next_shown = false
+				ui.over:open("eliminated", 0, 0, ui._stats)
+				task.wait(4)
+				return ("results open=%s, next match open=%s"):format(tostring(ui.over.is_open), tostring(ui.next_match.is_open))
+			elseif words[2] == "press" then
+				-- `next press solo|public`: as if that button were pressed
+				local sig = ui.next_match[words[3] or ""]
+				if sig == nil or not ui.next_match.is_open then
+					return "not open, or no such button"
+				end
+				sig:Fire()
+				task.wait(3)
+				return ("pressed %s: open=%s mode=%s"):format(words[3], tostring(ui.next_match.is_open), tostring(ui.ctx:mode()))
+			end
+			ui:open_next_match(if words[2] == "first" then "first" else "preview")
+			task.wait(0.5)
+			local r = ui.next_match._panel:get_global_rect()
+			return ("next match: x %d..%d y %d..%d (screen %dx%d, compact=%s)"):format(
+				r.Min.X,
+				r.Max.X,
+				r.Min.Y,
+				r.Max.Y,
+				ui.ctx.vp.X,
+				ui.ctx.vp.Y,
+				tostring(ui.ctx.compact)
+			)
 		elseif op == "party" then
 			-- the title's party panel (layout checks): `party` opens it, `party list` the invite list,
 			-- `party members <n>` a party of n, `party close` closes both

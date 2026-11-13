@@ -22,6 +22,7 @@ local TouchRouter = require("./TouchRouter")
 local TitleScreen = require("./TitleScreen")
 local SpawnOverlay = require("./SpawnOverlay")
 local GameOver = require("./GameOver")
+local NextMatch = require("./NextMatch")
 local Takeover = require("./Takeover")
 local Locker = require("./Locker")
 local Arsenal = require("./Arsenal")
@@ -1040,6 +1041,27 @@ function UIRoot._build(self)
 		self.takeover:start()
 	end)
 	root:add_child(over)
+	-- NEXT MATCH, over the results of a new player's first match (UI/NextMatch)
+	local next_match = NextMatch.new(ctx)
+	next_match.name = "NextMatch"
+	self.next_match = next_match
+	next_match.solo:Connect(function()
+		self:_next_match_go("solo")
+	end)
+	next_match.public:Connect(function()
+		self:_next_match_go("public")
+	end)
+	next_match.closed:Connect(function()
+		if self._next_going == nil then
+			ctx:session_call("report", { "next_match", "back", self._next_from })
+		end
+		self._next_going = nil
+		self:_update_input_gate()
+	end)
+	over.opened:Connect(function()
+		self:_maybe_next_match()
+	end)
+	root:add_child(next_match)
 	local pause = PauseMenu.new(ctx)
 	pause.name = "GameMenu"
 	self.pause = pause
@@ -1057,6 +1079,9 @@ function UIRoot._build(self)
 	end)
 	pause.new_player_requested:Connect(function()
 		self:replay_as_new_player()
+	end)
+	pause.next_match_preview:Connect(function()
+		self:open_next_match("preview")
 	end)
 	pause.help_requested:Connect(function()
 		self:toggle_help()
@@ -2103,11 +2128,63 @@ function UIRoot._update_music(self)
 	ctx:set_music_mood(mood)
 end
 
+--- A new player's first match (a solo one) ended: NEXT MATCH, once, NextMatch.DELAY_S after the results.
+function UIRoot._maybe_next_match(self)
+	local tel = self.telemetry
+	if self._next_shown or tel == nil or not tel:first_match() or self.ctx:mode() ~= UICtx.MODE_SOLO then
+		return
+	end
+	self._next_shown = true
+	self._next_at = UICtx.msec() + NextMatch.DELAY_S * 1000
+end
+
+--- Opens NEXT MATCH: "first" (after a first match) or "preview" (the title's menu, for admins and
+--- Rofront Staging: its buttons start the match they say, from the title).
+function UIRoot.open_next_match(self, from: string)
+	local ctx = self.ctx
+	self._next_from = from
+	self._next_going = nil
+	self.next_match:open(UIMaps.name_of(UIMaps.valid(ctx:setting("map_id", UIMaps.DEFAULT_ID))), self.over.is_open)
+	ctx:session_call("report", { "next_match", "shown", from })
+	self:_update_input_gate()
+end
+
+--- NEXT MATCH's choice: a solo match (the player's difficulty and map) or Quick Play (a public match).
+function UIRoot._next_match_go(self, kind: string)
+	local ctx = self.ctx
+	self._next_going = kind
+	ctx:session_call("report", { "next_match", kind, self._next_from })
+	self.next_match:close()
+	local d = math.clamp(tonumber(ctx:setting("difficulty", UICtx.DEFAULT_DIFFICULTY)) or UICtx.DEFAULT_DIFFICULTY, 0, 2)
+	local in_solo = ctx:mode() == UICtx.MODE_SOLO
+	if self.over.is_open then
+		self.over:close()
+	end
+	if kind == "solo" then
+		if in_solo then
+			self:_restart_solo(d)
+		else
+			self:_on_play_solo(d)
+		end
+		return
+	end
+	ctx:sfx("click")
+	if in_solo then
+		-- out of the solo match first: Quick Play once the title is up (asked in the same moment,
+		-- the join was lost in Studio, 2026-11-13)
+		ctx:session_call("leave_match")
+		self._public_after = UICtx.msec() + 10000
+		return
+	end
+	ctx:session_call("join_public", { "ffa" })
+end
+
 function UIRoot._update_input_gate(self)
 	local ctx = self.ctx
 	local modal = self.help.is_open
 		or self.pause.is_open
 		or self.over.is_open
+		or (self.next_match ~= nil and self.next_match.is_open)
 		or self.map_picker.is_open
 		or (self.locker ~= nil and self.locker.is_open)
 		or (self.flag_shop ~= nil and self.flag_shop.is_open)
@@ -2306,6 +2383,9 @@ function UIRoot._layout(self)
 	if self.over.is_open then
 		self.over:apply_layout()
 	end
+	if self.next_match ~= nil and self.next_match.is_open then
+		self.next_match:apply_layout()
+	end
 	if UITheme.min_font_size > 0 then
 		self.probe:enforce_min_font(root)
 	end
@@ -2442,6 +2522,20 @@ function UIRoot._process(self, delta: number)
 	end
 	if self._tutorial_at ~= nil then
 		guard("UIRoot tutorial", self._tutorial_step, self)
+	end
+	if self._public_after ~= nil then
+		if UICtx.msec() > self._public_after then
+			self._public_after = nil
+		elseif self.ctx:mode() == UICtx.MODE_TITLE and self.ctx:session_call("is_building") ~= true then
+			self._public_after = nil
+			self.ctx:session_call("join_public", { "ffa" })
+		end
+	end
+	if self._next_at ~= nil and UICtx.msec() >= self._next_at then
+		self._next_at = nil
+		if self.over.is_open and not self.next_match.is_open and self.ctx:mode() == UICtx.MODE_SOLO then
+			guard("UIRoot next match", self.open_next_match, self, "first")
+		end
 	end
 	if self.arsenal ~= nil and self.arsenal.is_open then
 		guard("Arsenal.frame", self.arsenal.frame, self.arsenal, delta)

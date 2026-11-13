@@ -356,6 +356,8 @@ function PauseMenu.new(c: any)
 	self.tips_reset = Signal.new()
 	--- Rofront Staging, and game admins: "Replay as new player" was pressed and confirmed
 	self.new_player_requested = Signal.new()
+	--- Rofront Staging, and game admins, on the title: "Next-match screen" (UI/NextMatch, to try it)
+	self.next_match_preview = Signal.new()
 	self.is_open = false
 	self._layout_compact = -1
 	--- "menu" or "settings", and whether the settings page was reached from the menu (DONE goes back)
@@ -488,6 +490,15 @@ function PauseMenu.new(c: any)
 		self:_ask_new_player()
 	end)
 	self._new_player:set_visible(false)
+	-- (the same people, on the title: the screen that follows a new player's first match, to try it)
+	self._next_preview = UITheme.button("Next-match screen", "GhostButton", "play", 44.0)
+	self._next_preview.alignment = W.ALIGN_LEFT
+	self._next_preview:set_font_size(13)
+	self._next_preview.pressed:Connect(function()
+		self:close()
+		self.next_match_preview:Fire()
+	end)
+	self._next_preview:set_visible(false)
 	self._divider = UITheme.hdivider()
 	self._restart = UITheme.button("Restart match", "GlassButton", "retreat", 46.0)
 	self._restart.alignment = W.ALIGN_LEFT
@@ -628,6 +639,7 @@ function PauseMenu.open(self, labels_on: boolean, page: string?)
 	self._tips:set_text("Show tips again")
 	self._tips:set_disabled(false)
 	self._new_player:set_visible(ctx.staging == true or ctx:admin())
+	self._next_preview:set_visible(on_title and (ctx.staging == true or ctx:admin()))
 	local o = ctx:my()
 	local alive = o ~= nil and o.alive and ctx.state ~= nil and ctx.state.phase == Defs.PHASE_PLAYING
 	self._leave:set_visible(not on_title or ctx:mp_waiting())
@@ -728,6 +740,7 @@ function PauseMenu._reflow(self, compact: boolean)
 		self._confirm_sw,
 		self._tips,
 		self._new_player,
+		self._next_preview,
 		self._divider,
 		self._restart,
 		self._leave,
@@ -773,7 +786,7 @@ function PauseMenu._reflow(self, compact: boolean)
 			-- (no labels or orders on the title: the music slider and the pops side by side; Staging's
 			-- "Replay as new player" under them, the game menu's main page being out of reach on the title)
 			a = { self._music, self._new_player }
-			b = { self._pops }
+			b = { self._pops, self._next_preview }
 		else
 			a = { self._music, self._pops, self._new_player }
 			b = { self._labels, self._confirm_sw }
@@ -788,6 +801,7 @@ function PauseMenu._reflow(self, compact: boolean)
 			self._confirm_sw,
 			self._tips,
 			self._new_player,
+			self._next_preview,
 			self._done,
 		}
 	elseif compact then

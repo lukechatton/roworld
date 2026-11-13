@@ -43,6 +43,8 @@ function GameOver.new(c: any)
 	self.take_over = Signal.new()
 	--- the Stars pill was pressed
 	self.open_arsenal = Signal.new()
+	--- (kind) the screen opened, or its copy changed in place (UIRoot: NEXT MATCH after a first match)
+	self.opened = Signal.new()
 	--- the payout shown ({ lines, total, balance }), and the count on its way up to the total
 	self._award = nil :: any
 	self._stars_shown = 0.0
@@ -591,6 +593,7 @@ function GameOver.open(self, kind: string, winner: number, killer: number, stats
 	end
 	self._sweep_t = 0.0
 	ctx:set_world_input(false)
+	self.opened:Fire(kind)
 end
 
 --- The takeover offer (Takeover.refresh): {name, color, price, saved, busy} or nil. Kept, and shown
