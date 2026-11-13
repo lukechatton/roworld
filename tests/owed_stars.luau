@@ -354,6 +354,92 @@ local again = go(function()
 end)
 expect(again == false and rows.u606.stars == 200, "not again")
 
+print("requests with nothing to spend write nothing")
+-- (v117: one record written ~118 times a minute, the cap on a player's crate / credit / unlock requests)
+local Arsenal = require("../src/shared/Data/Arsenal")
+local priced
+for _, it in Arsenal.ITEMS do
+	if it.stars ~= nil then
+		priced = it
+		break
+	end
+end
+local X = { UserId = 707 }
+rows.u707 = { stars = 0 }
+Purchases.configure({
+	players = {
+		GetPlayerByUserId = function(_, id)
+			return if id == 707 then X else nil
+		end,
+	},
+	rng = {
+		NextNumber = function()
+			return 0.5
+		end,
+	},
+})
+go(function()
+	Purchases.load(X)
+end)
+Purchases.take_stats()
+before = updates
+local used_ok, used_why = go(function()
+	return Purchases.use(X, "takeover")
+end)
+local crate_ok, crate_why = go(function()
+	return Purchases.open_crate(X)
+end)
+local buy_ok, buy_why = go(function()
+	return Purchases.buy_unlock(X, priced.key)
+end)
+expect(
+	used_ok == false and used_why == "no credit" and crate_ok == false and crate_why == "no crate",
+	"no credit, no crate"
+)
+expect(buy_ok == false and buy_why == "not enough", "not enough Stars")
+local xs = Purchases.take_stats()
+expect(updates == before and xs.skipped == 3 and xs.writes == 0, "and no writes (" .. updates - before .. ")")
+
+print("a purchase that lands makes the next request write")
+expect(go(function()
+	return Purchases.grant(707, "takeover", "r-707-1")
+end) == "granted", "a takeover credit bought")
+used_ok = go(function()
+	return Purchases.use(X, "takeover")
+end)
+expect(used_ok == true and rows.u707.credits.takeover == 0, "spent")
+
+print("a write in doubt: judged by the store, not the record held")
+rows.u707.credits.crate = 1 -- (stored by a write this server doesn't know of)
+refuse = 1
+go(function()
+	return Purchases.add_stars(X, 5)
+end)
+expect(rows.u707.credits.crate == 1 and rows.u707.stars == 0, "(a write refused: the record held is in doubt)")
+crate_ok = go(function()
+	return Purchases.open_crate(X)
+end)
+expect(crate_ok == true and rows.u707.credits.crate == 0, "the crate opened")
+
+print("Stars owed to them count toward an unlock")
+local Y = { UserId = 808 }
+rows.u808 = { stars = priced.stars - 50 }
+go(function()
+	Purchases.load(Y)
+end)
+refuse = 2
+go(function()
+	return Purchases.add_stars(Y, 50)
+end)
+expect(rows.u808.stars == priced.stars - 50 and Purchases.stars(Y) == priced.stars, "50 owed, enough with them")
+refuse = 0
+buy_ok = go(function()
+	return Purchases.buy_unlock(Y, priced.key)
+end)
+expect(buy_ok == true and rows.u808.stars == 0 and rows.u808.unlocks[priced.key], "the write added them and bought it")
+run(t + 200)
+expect(rows.u808.stars == 0, "and the owed 50 weren't stored twice")
+
 print("the most writes to one record this window")
 Purchases.take_stats()
 for _ = 1, 3 do

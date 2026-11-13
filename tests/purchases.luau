@@ -96,10 +96,16 @@ local ok2 = Purchases.use(P, "takeover")
 local ok3, why = Purchases.use(P, "takeover")
 expect(ok1 and ok2 and not ok3 and why == "no credit", "two uses, the third refused (" .. tostring(why) .. ")")
 expect(rows.u42.credits.takeover == 0 and notified[#notified] == 0, "stored 0, the client told")
+local skipped0 = Purchases.take_stats().skipped
+expect(skipped0 >= 1, "the third use wrote nothing (none to spend: the record held said so)")
+Purchases.process_receipt({ PlayerId = 42, ProductId = 777, PurchaseId = "r-down" })
 down = true
 local ok4, why4 = Purchases.use(P, "takeover")
 down = false
-expect(not ok4 and string.find(why4, "store", 1, true) ~= nil, "store down: nothing spent (" .. tostring(why4) .. ")")
+expect(
+	not ok4 and string.find(why4, "store", 1, true) ~= nil and rows.u42.credits.takeover == 1,
+	"store down: nothing spent (" .. tostring(why4) .. ")"
+)
 expect(not (Purchases.use(P, "nope")), "an unknown kind can't be spent")
 for i = 1, Purchases.RECEIPTS_KEPT + 20 do
 	Purchases.process_receipt({ PlayerId = 42, ProductId = 777, PurchaseId = "bulk" .. i })

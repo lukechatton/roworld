@@ -461,6 +461,19 @@ local function remember(player: any, rec: Record)
 	}
 end
 
+--- The record to judge a request by without writing (2026-11-13: v117's servers showed one record
+--- written ~118 times a minute, the 2-a-second cap on a player's crate / credit / unlock requests, and
+--- every one wrote even with nothing to spend). The record as last read or written, when nothing can
+--- have changed it meanwhile: loaded, no write of ours in flight (a purchase landing) or in doubt.
+--- Nil: write, and judge inside the write.
+local function settled_record(player: any): Record?
+	local uid = player.UserId
+	if loading[player] ~= nil or busy[uid] ~= nil or doubt[uid] then
+		return nil
+	end
+	return records[player]
+end
+
 local function now_s(): number
 	return if type(deps.now) == "function" then deps.now() else os.time()
 end
@@ -930,6 +943,11 @@ function Purchases.use(player: any, kind: string): (boolean, string?)
 	if Products[kind] == nil then
 		return false, "unknown product"
 	end
+	local known = settled_record(player)
+	if known ~= nil and (known.credits[kind] or 0) <= 0 then
+		Purchases.stats.skipped += 1
+		return false, "no credit" -- (none to spend: nothing to write)
+	end
 	local spent = false
 	local left: { [string]: number }? = nil
 	local ok, err = pcall(function()
@@ -1063,6 +1081,18 @@ end
 --- published odds), in one write; the new item is equipped when its slot is empty. Yields.
 --- (ok, item_id) or (false, "no crate" | "everything owned" | "store unavailable: ...").
 function Purchases.open_crate(player: any): (boolean, string?)
+	local known = settled_record(player)
+	if known ~= nil then
+		-- (nothing to write: no crate, or nothing left to roll)
+		if (known.credits.crate or 0) <= 0 then
+			Purchases.stats.skipped += 1
+			return false, "no crate"
+		end
+		if Cosmetics.roll(known.owned, 0, 0) == nil then
+			Purchases.stats.skipped += 1
+			return false, "everything owned"
+		end
+	end
 	local rng = deps.rng or Random.new()
 	local got: string? = nil
 	local why = "no crate"
@@ -1308,6 +1338,18 @@ function Purchases.buy_unlock(player: any, item_key: any): (boolean, string?)
 	end
 	if it.stars == nil then
 		return false, "robux only"
+	end
+	local known = settled_record(player)
+	if known ~= nil then
+		-- (nothing to write: owned, or short even with the Stars owed to them, which the write would add)
+		if known.unlocks[it.key] then
+			Purchases.stats.skipped += 1
+			return false, "owned"
+		end
+		if known.stars + owed_stars(player.UserId) < it.stars then
+			Purchases.stats.skipped += 1
+			return false, "not enough"
+		end
 	end
 	local why = "store unavailable"
 	local done = false
