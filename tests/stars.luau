@@ -312,7 +312,8 @@ do
 	-- a store outage
 	down = true
 	local s0 = Purchases.stars(P)
-	expect(not Purchases.add_stars(P, 100) and Purchases.stars(P) == s0, "store down: no Stars paid")
+	-- (owed until the store takes them: tests/owed_stars.luau)
+	expect(Purchases.add_stars(P, 100) and Purchases.stars(P) == s0 + 100, "store down: the Stars are owed, and shown")
 	expect(
 		select(2, Purchases.buy_unlock(P, "scatter")) ~= nil and not Purchases.has_unlock(P, "scatter"),
 		"store down: nothing unlocked"

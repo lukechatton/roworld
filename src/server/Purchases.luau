@@ -96,6 +96,8 @@ type Record = {
 	gifts: { [string]: boolean },
 	--- RoWorld General: the UTC day whose perks were given (Purchases.general_perks)
 	general_day: number?,
+	--- the ids of the last PAYOUTS_KEPT Stars payouts stored (a payout tried again is stored once)
+	payouts: { string },
 }
 
 --- Reading a player's record when they join: GetAsync attempts and the waits between them. Roblox
@@ -108,8 +110,24 @@ Purchases.LOAD_BACKOFF = { 1, 3, 6, 10 }
 --- LOAD_RETRY_S, LOAD_RETRIES more times, while the player stays.
 Purchases.LOAD_RETRY_S = 20
 Purchases.LOAD_RETRIES = 30
---- Stars that could not be paid on this server: every write failed, DsGate's retries included.
+--- Stars that could not be paid at all: owed (below), and then not even kept in MemoryStore.
 Purchases.lost = { payouts = 0, stars = 0 }
+--- Stars payouts whose write failed are owed, not lost (2026-11-13: since Nov 10 Roblox refused so
+--- many writes to the Purchases store that 50,000-97,000 match payouts a day failed every retry and
+--- were dropped). An owed payout keeps its id and goes with the player's next write to their record
+--- (any write: a crate, an equip, the next payout), is tried again over OWED_RETRY_S while they stay,
+--- and is kept in MemoryStore when they leave (deps.owed_map, OWED_HOLD_S): the next server they join
+--- pays it. The record keeps the ids of its last PAYOUTS_KEPT payouts, so one is never stored twice.
+Purchases.OWED_RETRY_S = { 15, 30, 60, 120 }
+Purchases.OWED_HOLD_S = 45 * 24 * 3600
+Purchases.PAYOUTS_KEPT = 50
+--- One write at a time to a record from this server: a second write to the same key within Roblox's
+--- cooldown waits in Roblox's queue, and a full queue (30) drops every other player's writes too (the
+--- error report's "DataStore request was added to queue ... Key = u<player>"). A write waits at most
+--- this long for the one before it.
+Purchases.KEY_WAIT_S = 30
+--- Counts for the server's report (Purchases.take_stats).
+Purchases.stats = { payouts = 0, owed_new = 0, owed_paid = 0, owed_kept = 0, writes = 0, write_fails = 0, skipped = 0 }
 
 local deps: { [string]: any } = {}
 local cache: { [any]: { [string]: number } } = {}
@@ -125,21 +143,115 @@ local busy: { [number]: number } = {}
 --- user id -> a write failed since the record was last read or written: what this server holds may
 --- not be what is stored (Purchases.use keeps a spend before it is stored)
 local doubt: { [number]: boolean } = {}
+--- user id -> Stars payouts not stored yet: { id, stars, tutorial?, m? (also in MemoryStore) }
+local owed: { [number]: { any } } = {}
+--- user id -> a retry of their owed payouts is under way
+local retrying: { [number]: boolean } = {}
+--- user id -> writes to their record in this report's window (the most to one record is reported)
+local key_writes: { [number]: number } = {}
+--- players who left (a write landing after that doesn't bring their entry back)
+local left: { [any]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+--- (defined after clean: the owed payouts folded into a record)
+local fold_owed: (any, number, { any }) -> any
 
---- Every write to a record: UpdateAsync on its key, counted while in flight. Errors as UpdateAsync does.
+--- What is left of `list` without the entries whose ids are in `ids`.
+local function without(list: { any }?, ids: { [string]: boolean }): { any }?
+	if list == nil then
+		return nil
+	end
+	local out = {}
+	for _, e in list do
+		if not ids[e.id] then
+			table.insert(out, e)
+		end
+	end
+	return if #out > 0 then out else nil
+end
+
+--- `entries` were stored: off the owed list, and out of MemoryStore for those that were kept there.
+local function owed_stored(user_id: number, entries: { any })
+	local ids: { [string]: boolean } = {}
+	local kept: { [string]: boolean } = {}
+	local any_kept = false
+	for _, e in entries do
+		ids[e.id] = true
+		if e.late then
+			Purchases.stats.owed_paid += 1
+		end
+		if e.m then
+			kept[e.id] = true
+			any_kept = true
+		end
+	end
+	owed[user_id] = without(owed[user_id], ids)
+	local map = deps.owed_map
+	if any_kept and map ~= nil then
+		local spawn = deps.spawn or task.spawn
+		spawn(function()
+			pcall(function()
+				map:UpdateAsync("u" .. tostring(user_id), function(old: any): any
+					return without(if type(old) == "table" then old else nil, kept) or {}
+				end, Purchases.OWED_HOLD_S)
+			end)
+		end)
+	end
+end
+
+--- Every write to a record: UpdateAsync on its key, one at a time per record from this server, counted
+--- while in flight, and carrying the player's owed payouts. Errors as UpdateAsync does.
 local function update(user_id: number, fn: (any) -> any): any
+	if deps.wait ~= nil then
+		local waited = 0
+		while busy[user_id] ~= nil and waited < Purchases.KEY_WAIT_S do
+			waited += 0.05
+			deps.wait(0.05)
+		end
+	end
 	busy[user_id] = (busy[user_id] or 0) + 1
+	Purchases.stats.writes += 1
+	key_writes[user_id] = (key_writes[user_id] or 0) + 1
+	local due = owed[user_id]
+	local pending = if due ~= nil and #due > 0 then table.clone(due) else nil
+	local transform = fn
+	if pending ~= nil then
+		transform = function(old: any): any
+			local base = fold_owed(old, user_id, pending)
+			local v = fn(if base ~= nil then base else old)
+			if v ~= nil then
+				return v
+			end
+			return base
+		end
+	end
 	local ok, res = pcall(function()
-		return deps.datastore:UpdateAsync("u" .. tostring(user_id), fn)
+		return deps.datastore:UpdateAsync("u" .. tostring(user_id), transform)
 	end)
 	local n = (busy[user_id] or 1) - 1
 	busy[user_id] = if n > 0 then n else nil
 	if not ok then
+		Purchases.stats.write_fails += 1
 		doubt[user_id] = true
 		error(res, 0)
 	end
 	doubt[user_id] = nil
+	if pending ~= nil then
+		owed_stored(user_id, pending)
+	end
 	return res
+end
+
+--- Stars owed to the player (not stored yet), for what they are shown.
+local function owed_stars(user_id: number): number
+	local n = 0
+	for _, e in owed[user_id] or {} do
+		n += e.stars
+	end
+	return n
+end
+
+--- A payout's id: unique enough within one player's last PAYOUTS_KEPT.
+local function new_id(): string
+	return string.format("%06x%06x", math.random(0, 0xFFFFFF), math.random(0, 0xFFFFFF))
 end
 
 function Purchases.configure(d: { [string]: any })
@@ -156,8 +268,15 @@ function Purchases.reset()
 	table.clear(records)
 	table.clear(busy)
 	table.clear(doubt)
+	table.clear(owed)
+	table.clear(retrying)
+	table.clear(key_writes)
+	table.clear(left)
 	Purchases.lost.payouts = 0
 	Purchases.lost.stars = 0
+	for k in Purchases.stats do
+		Purchases.stats[k] = 0
+	end
 end
 
 --- The credit kind a product grants (nil: not ours), and how many of it (the 3-crate pack: 3).
@@ -186,6 +305,7 @@ local function clean(v: any, user_id: number?): Record
 		unlocks = {},
 		paid = false,
 		gifts = {},
+		payouts = {},
 	}
 	if type(v) ~= "table" then
 		v = {}
@@ -241,6 +361,13 @@ local function clean(v: any, user_id: number?): Record
 		end
 	end
 	rec.crates_bought = math.max(0, math.floor(tonumber(v.crates_bought) or 0))
+	if type(v.payouts) == "table" then
+		for _, id in v.payouts do
+			if type(id) == "string" and #id <= 24 then
+				table.insert(rec.payouts, id)
+			end
+		end
+	end
 	if type(v.credits) == "table" then
 		for k, n in v.credits do
 			if type(k) == "string" and type(n) == "number" and n == n then
@@ -266,6 +393,29 @@ local function clean(v: any, user_id: number?): Record
 	return rec
 end
 
+--- The record `old` with the owed payouts `entries` stored on it (each once: its id is kept), or nil
+--- when every one of them is stored already. A tutorial's Stars are paid once whatever the id.
+fold_owed = function(old: any, user_id: number, entries: { any }): any
+	local rec = clean(old, user_id)
+	local changed = false
+	for _, e in entries do
+		-- (the tutorial's Stars come once, whatever their id)
+		if not table.find(rec.payouts, e.id) and not (e.tutorial and rec.tutorial_paid) then
+			rec.stars = math.min(rec.stars + e.stars, Purchases.MAX_STARS)
+			rec.stars_earned = math.min(rec.stars_earned + e.stars, Purchases.MAX_STARS)
+			if e.tutorial then
+				rec.tutorial_paid = true
+			end
+			table.insert(rec.payouts, e.id)
+			changed = true
+		end
+	end
+	while #rec.payouts > Purchases.PAYOUTS_KEPT do
+		table.remove(rec.payouts, 1)
+	end
+	return if changed then rec else nil
+end
+
 local function log(text: string)
 	if deps.log then
 		deps.log("[Purchases] " .. text)
@@ -284,6 +434,9 @@ local function player_by_id(user_id: number): any
 end
 
 local function remember(player: any, rec: Record)
+	if left[player] then
+		return -- (a write that landed after they left)
+	end
 	loading[player] = nil -- (the record is here: a load still retrying has nothing left to do)
 	records[player] = rec
 	cache[player] = rec.credits
@@ -373,7 +526,8 @@ function Purchases.inventory(player: any): any
 		owned = owned,
 		equipped = if i ~= nil then table.clone(i.equipped) else {},
 		crates_bought = if i ~= nil then i.crates_bought else 0,
-		stars = if i ~= nil then i.stars else 0,
+		-- (with Stars owed: paid, not stored yet)
+		stars = (if i ~= nil then i.stars else 0) + owed_stars(player.UserId),
 		unlocks = unlocks,
 		starter = Purchases.starter_state(player),
 	}
@@ -403,6 +557,11 @@ end
 function Purchases.starter_seen(player: any): boolean
 	if not starter_on_sale() then
 		return false
+	end
+	local known = records[player]
+	if known ~= nil and (known.starter ~= nil or not starter_eligible(known)) then
+		Purchases.stats.skipped += 1
+		return false -- (started before, or not for them: nothing to write)
 	end
 	local started = false
 	local stored: Record? = nil
@@ -441,9 +600,10 @@ function Purchases.unlock_mask(player: any): number
 	return if i ~= nil then Arsenal.mask(i.unlocks) else 0
 end
 
+--- The player's Stars, with those owed (paid, not stored yet).
 function Purchases.stars(player: any): number
 	local i = inv[player]
-	return if i ~= nil then i.stars else 0
+	return (if i ~= nil then i.stars else 0) + owed_stars(player.UserId)
 end
 
 --- What the player shows in a match: { skin = id?, flag = id? } (nil when nothing is equipped).
@@ -583,23 +743,135 @@ function Purchases.grant(user_id: number, kind: string, receipt: string, n: numb
 	return "granted"
 end
 
+--- What a write error was, in a word (for the warning the error report counts).
+local function reason(err: any): string
+	local text = tostring(err)
+	for _, word in { "TooManyRequests", "InternalServerError", "ServiceUnavailable", "Throttled", "queue was full" } do
+		if string.find(text, word, 1, true) then
+			return word
+		end
+	end
+	return "other"
+end
+
+--- Owed Stars that could not even be kept for later (MemoryStore refused them): lost. The server log has
+--- who and how many; the warning is worded the same each time so the error report counts them.
+local function stars_lost(user_id: number, amount: number, what: string, err: any)
+	Purchases.lost.payouts += 1
+	Purchases.lost.stars += amount
+	log(string.format("could not pay %d %s Stars to %d: %s", amount, what, user_id, tostring(err)))
+	if deps.warn then
+		deps.warn(string.format("[Purchases] %s Stars lost after every retry (%s)", what, reason(err)))
+	end
+end
+
+local function spawn_fn(): any
+	return deps.spawn or (if IS_ROBLOX then task.spawn else nil)
+end
+
+--- One write that stores the player's owed payouts (update carries them). True when none are left.
+local function pay_owed(player: any): boolean
+	local uid = player.UserId
+	if owed[uid] == nil then
+		return true
+	end
+	local stored: Record? = nil
+	local ok = pcall(function()
+		update(uid, function(old: any): any
+			stored = clean(old, uid)
+			return nil
+		end)
+	end)
+	if ok and stored ~= nil then
+		remember(player, stored :: Record)
+		notify(player)
+	end
+	return owed[uid] == nil
+end
+
+--- Tries the owed payouts again over OWED_RETRY_S while the player is here (until they are stored, or
+--- the player leaves: their owed Stars go with them, Purchases.leave_owed).
+local function retry_owed(player: any)
+	local uid = player.UserId
+	local spawn = spawn_fn()
+	if retrying[uid] or deps.wait == nil or spawn == nil then
+		return
+	end
+	retrying[uid] = true
+	spawn(function()
+		local i = 0
+		while owed[uid] ~= nil do
+			i += 1
+			deps.wait(Purchases.OWED_RETRY_S[math.min(i, #Purchases.OWED_RETRY_S)])
+			if owed[uid] == nil or left[player] then
+				break
+			end
+			pay_owed(player)
+		end
+		retrying[uid] = nil
+	end)
+end
+
+--- A joining player's owed Stars kept in MemoryStore by the server they left: owed here (and paid).
+local function collect_owed(player: any)
+	local map = deps.owed_map
+	if map == nil then
+		return
+	end
+	local uid = player.UserId
+	local ok, v = pcall(function()
+		return map:GetAsync("u" .. tostring(uid))
+	end)
+	if not ok or type(v) ~= "table" or left[player] then
+		return
+	end
+	local list = owed[uid] or {}
+	local have: { [string]: boolean } = {}
+	for _, e in list do
+		have[e.id] = true
+	end
+	for _, e in v do
+		local n = if type(e) == "table" then math.floor(tonumber(e.stars) or 0) else 0
+		if type(e) == "table" and type(e.id) == "string" and #e.id <= 24 and not have[e.id] and n > 0 and n <= 1000000 then
+			table.insert(list, { id = e.id, stars = n, tutorial = if e.tutorial == true then true else nil, m = true, late = true })
+			have[e.id] = true
+		end
+	end
+	if #list == 0 then
+		return
+	end
+	owed[uid] = list
+	notify(player)
+	if not pay_owed(player) then
+		retry_owed(player)
+	end
+end
+
 --- Yields: LOAD_ATTEMPTS reads with LOAD_BACKOFF between them, then, with the session already going
 --- on an empty record, more every LOAD_RETRY_S (deps.wait; without one, a single attempt).
 --- A player teleported here by a server of ours comes with the record that server held when they left
 --- (deps.arrived: server/Handoff); then nothing is read.
 function Purchases.load(player: any)
 	local token = {}
+	left[player] = nil
 	loading[player] = token
+	local got: any = nil
 	if deps.arrived then
-		local ok, got = pcall(deps.arrived, player)
+		local ok, g = pcall(deps.arrived, player)
+		got = if ok and type(g) == "table" then g else nil
 		if loading[player] ~= token then
 			return
 		end
-		if ok and type(got) == "table" and type(got.p) == "table" then
-			remember(player, clean(got.p, player.UserId))
-			notify(player)
-			return
-		end
+	end
+	-- Stars owed from an earlier server: kept in MemoryStore (a handoff says whether there are any)
+	local spawn = spawn_fn()
+	if deps.owed_map ~= nil and spawn ~= nil and (got == nil or got.o == true) then
+		spawn(collect_owed, player)
+	end
+	if got ~= nil and type(got.p) == "table" then
+		remember(player, clean(got.p, player.UserId))
+		notify(player)
+		return
 	end
 	local wait = deps.wait
 	local tries = 0
@@ -679,12 +951,81 @@ function Purchases.use(player: any, kind: string): (boolean, string?)
 	return true, nil
 end
 
+--- A player leaving: their owed Stars (if any) go to MemoryStore for the next server they join. Yields.
+--- True when there were some and they were kept (a handoff tells the next server to look).
+function Purchases.leave_owed(player: any): boolean
+	local uid = player.UserId
+	local entries = owed[uid]
+	owed[uid] = nil
+	if entries == nil then
+		return false
+	end
+	local map = deps.owed_map
+	local ok, err = false, "no MemoryStore"
+	if map ~= nil then
+		ok, err = pcall(function()
+			map:UpdateAsync("u" .. tostring(uid), function(old: any): any
+				local list = if type(old) == "table" then old else {}
+				local have: { [string]: boolean } = {}
+				for _, e in list do
+					if type(e) == "table" then
+						have[e.id] = true
+					end
+				end
+				for _, e in entries do
+					if not have[e.id] then
+						table.insert(list, { id = e.id, stars = e.stars, tutorial = e.tutorial })
+					end
+				end
+				return list
+			end, Purchases.OWED_HOLD_S)
+		end)
+	end
+	if ok then
+		Purchases.stats.owed_kept += #entries
+		return true
+	end
+	for _, e in entries do
+		stars_lost(uid, e.stars, if e.tutorial then "tutorial" else "match", err)
+	end
+	return false
+end
+
 function Purchases.release(player: any)
+	left[player] = true
 	loading[player] = nil
 	cache[player] = nil
 	inv[player] = nil
 	records[player] = nil
 	doubt[player.UserId] = nil
+	key_writes[player.UserId] = nil
+	if owed[player.UserId] ~= nil then
+		local spawn = spawn_fn()
+		if spawn ~= nil then
+			spawn(Purchases.leave_owed, player)
+		else
+			Purchases.leave_owed(player)
+		end
+	end
+end
+
+--- This window's counts (and a fresh window): payouts, owed and stored late, kept for later, writes,
+--- failed writes, writes skipped (nothing to change), and the most writes to one record.
+function Purchases.take_stats(): { [string]: number }
+	local out: { [string]: number } = table.clone(Purchases.stats)
+	local most = 0
+	for _, n in key_writes do
+		most = math.max(most, n)
+	end
+	out.max_key = most
+	out.lost = Purchases.lost.payouts
+	out.lost_stars = Purchases.lost.stars
+	for k in Purchases.stats do
+		Purchases.stats[k] = 0
+	end
+	Purchases.lost.payouts, Purchases.lost.stars = 0, 0
+	table.clear(key_writes)
+	return out
 end
 
 --- A player leaving for another server of ours (server/Handoff): waits, at most `max_s`, for this
@@ -702,29 +1043,6 @@ function Purchases.settle(player: any, max_s: number): any
 		return nil
 	end
 	return records[player]
-end
-
---- What a write error was, in a word (for the warning the error report counts).
-local function reason(err: any): string
-	local text = tostring(err)
-	for _, word in { "TooManyRequests", "InternalServerError", "ServiceUnavailable", "Throttled", "queue was full" } do
-		if string.find(text, word, 1, true) then
-			return word
-		end
-	end
-	return "other"
-end
-
---- Stars that could not be paid after every retry (2026-11-03: the error report showed the store
---- refusing requests, not whether a payout was lost in the end). The server log has who and how many;
---- the warning is worded the same each time so the error report counts them by kind and reason.
-local function stars_lost(user_id: number, amount: number, what: string, err: any)
-	Purchases.lost.payouts += 1
-	Purchases.lost.stars += amount
-	log(string.format("could not pay %d %s Stars to %d: %s", amount, what, user_id, tostring(err)))
-	if deps.warn then
-		deps.warn(string.format("[Purchases] %s Stars lost after every retry (%s)", what, reason(err)))
-	end
 end
 
 --- Open one crate: spend a crate credit and add an item the player doesn't own (Cosmetics.roll, the
@@ -783,6 +1101,18 @@ function Purchases.equip(player: any, slot: string, id: any): (boolean, string?)
 			return false, "unknown item"
 		end
 	end
+	-- (nothing to write: already worn, or not theirs)
+	local known = records[player]
+	if known ~= nil then
+		if id ~= false and not known.owned[id] then
+			Purchases.stats.skipped += 1
+			return false, "not owned"
+		end
+		if known.equipped[slot] == (if id == false then nil else id) then
+			Purchases.stats.skipped += 1
+			return true, nil
+		end
+	end
 	local done = false
 	local stored: Record? = nil
 	local ok, err = pcall(function()
@@ -810,37 +1140,51 @@ end
 
 --- Pays `amount` Stars (a match's payout, Data/Stars). Yields. (ok, the new balance).
 --- The Stars for finishing the tutorial (Data/Tutorial), once per player. True when they were paid now.
+--- A payout `entry` ({ id, stars, tutorial? }): owed until stored, stored now if the store takes it.
+--- Returns the record as stored, or nil when it is owed for now (tried again, kept when they leave).
+local function pay(player: any, entry: any, what: string): Record?
+	local uid = player.UserId
+	Purchases.stats.payouts += 1
+	local list = owed[uid] or {}
+	table.insert(list, entry)
+	owed[uid] = list
+	local stored: Record? = nil
+	local ok, err = pcall(function()
+		update(uid, function(old: any): any
+			stored = clean(old, uid)
+			return nil -- (update stores the owed payouts, this one with them)
+		end)
+	end)
+	if ok and stored ~= nil then
+		remember(player, stored :: Record)
+		notify(player)
+		return stored
+	end
+	for _, e in owed[uid] or {} do
+		if not e.late then
+			e.late = true
+			Purchases.stats.owed_new += 1
+		end
+	end
+	log(string.format("%d %s Stars for %d owed for now: %s", entry.stars, what, uid, tostring(err)))
+	notify(player)
+	retry_owed(player)
+	return nil
+end
+
 function Purchases.tutorial_bonus(player: any, amount: number): boolean
 	local add = math.floor(tonumber(amount) or 0)
 	if add ~= add or add <= 0 then
 		return false
 	end
-	local stored: Record? = nil
-	local paid = false
-	local ok, err = pcall(function()
-		update(player.UserId, function(old: any): any
-			local rec = clean(old, player.UserId)
-			stored = rec
-			if rec.tutorial_paid then
-				paid = false
-				return nil
-			end
-			paid = true
-			rec.tutorial_paid = true
-			rec.stars = math.min(rec.stars + add, Purchases.MAX_STARS)
-			rec.stars_earned = math.min(rec.stars_earned + add, Purchases.MAX_STARS)
-			return rec
-		end)
-	end)
-	if not ok or stored == nil then
-		stars_lost(player.UserId, add, "tutorial", err)
-		return false
+	local known = records[player]
+	if known ~= nil and known.tutorial_paid then
+		Purchases.stats.skipped += 1
+		return false -- (paid before: nothing to write)
 	end
-	remember(player, stored :: Record)
-	if paid then
-		notify(player)
-	end
-	return paid
+	local id = new_id()
+	local stored = pay(player, { id = id, stars = add, tutorial = true }, "tutorial")
+	return stored ~= nil and table.find(stored.payouts, id) ~= nil
 end
 
 --- RoWorld General (Data/Subscription; 2026-10-27; server/General calls it while Roblox says the
@@ -850,6 +1194,13 @@ end
 --- the day's were given already), or nil when the store failed (tried again later).
 function Purchases.general_perks(player: any, day: number, skin: string?, crates: boolean): any
 	local it = if skin ~= nil then Cosmetics.item(skin) else nil
+	-- (this day's given already, and the month's skin owned: nothing to write; every server they join
+	-- asks once)
+	local known = records[player]
+	if known ~= nil and known.general_day == day and (it == nil or not it.general or known.owned[it.id]) then
+		Purchases.stats.skipped += 1
+		return {}
+	end
 	local stored: Record? = nil
 	local given: any = {}
 	local ok, err = pcall(function()
@@ -924,28 +1275,14 @@ function Purchases.reset_new_player(player: any, keep_owned: boolean?): boolean
 	return true
 end
 
+--- A match's Stars: stored now, or owed until they are (shown either way). Yields. (ok, the balance).
 function Purchases.add_stars(player: any, amount: number): (boolean, number)
 	local add = math.floor(tonumber(amount) or 0)
 	if add ~= add or add <= 0 then
 		return false, Purchases.stars(player)
 	end
-	local stored: Record? = nil
-	local ok, err = pcall(function()
-		update(player.UserId, function(old: any): any
-			local rec = clean(old, player.UserId)
-			rec.stars = math.min(rec.stars + add, Purchases.MAX_STARS)
-			rec.stars_earned = math.min(rec.stars_earned + add, Purchases.MAX_STARS)
-			stored = rec
-			return rec
-		end)
-	end)
-	if not ok or stored == nil then
-		stars_lost(player.UserId, add, "match", err)
-		return false, Purchases.stars(player)
-	end
-	remember(player, stored :: Record)
-	notify(player)
-	return true, (stored :: Record).stars
+	pay(player, { id = new_id(), stars = add }, "match")
+	return true, Purchases.stars(player)
 end
 
 --- Unlock Arsenal item `key` with Stars: one write takes its price and unlocks it. Yields.

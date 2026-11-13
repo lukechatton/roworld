@@ -67,7 +67,8 @@ function DsGate.wrap(store: any, deps: { [string]: any }?): any
 		d = default_deps :: { [string]: any }
 	end
 	local in_flight: { [string]: number } = { read = 0, write = 0 }
-	local gate = { waited = 0, retried = 0 }
+	-- (counts: requests that waited for budget, were sent again, and Roblox refused for its limits)
+	local gate = { waited = 0, retried = 0, throttled = 0 }
 
 	local function room(kinds: { string }): boolean
 		for _, k in kinds do
@@ -114,8 +115,12 @@ function DsGate.wrap(store: any, deps: { [string]: any }?): any
 				return table.unpack(res, 2, res.n)
 			end
 			local err = res[2]
+			local throttled = DsGate.throttled(err)
+			if throttled then
+				gate.throttled += 1
+			end
 			local pause = DsGate.RETRY_S[attempt]
-			if pause == nil or not DsGate.throttled(err) then
+			if pause == nil or not throttled then
 				error(err, 0)
 			end
 			gate.retried += 1

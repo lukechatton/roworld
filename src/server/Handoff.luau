@@ -24,9 +24,11 @@
 --     }
 --   h:stamp(players, data?) -> data      a teleport is about to start: a copy of `data` with the id
 --   h:leaving(player) -> boolean         PlayerRemoving: true when the player is on a stamped teleport
---   h:part(player, name, value?)         a leaving player's "p" (Purchases record) or "s" (settings);
---                                        nil: not known for sure. The entry goes when both are in.
---   h:arrived(player) -> { p?, s? }?     what the last server knew (yields; one read for all callers)
+--   h:part(player, name, value?)         a leaving player's "p" (Purchases record), "s" (settings) or
+--                                        "o" (true: Stars owed to them were kept in MemoryStore,
+--                                        Purchases.leave_owed); nil: not known for sure / none. The
+--                                        entry goes when all three are in.
+--   h:arrived(player) -> { p?, s?, o? }? what the last server knew (yields; one read for all callers)
 local Handoff = {}
 Handoff.__index = Handoff
 
@@ -35,7 +37,7 @@ Handoff.MAP = "handoff_v1"
 Handoff.HOLD_S = 300
 --- A leaving player's entry goes when both parts are in, or after this long with what is there.
 Handoff.PART_WAIT_S = 30
-Handoff.PARTS = { "p", "s" }
+Handoff.PARTS = { "p", "s", "o" }
 --- Arriving: the waits between reads while the entry isn't there yet (its last writes still landing).
 Handoff.POLL_S = { 0.5, 1, 1.5, 2 }
 --- A hash map item holds at most 32 KB: a bigger entry goes without its records.
@@ -120,7 +122,7 @@ end
 
 function Handoff._put(self: any, uid: number, out: any)
 	local d = self.deps
-	local entry = { id = out.id, p = out.parts.p, s = out.parts.s }
+	local entry = { id = out.id, p = out.parts.p, s = out.parts.s, o = if out.parts.o == true then true else nil }
 	if d.encode ~= nil then
 		-- (the entry still goes without them: the next server stops waiting and reads the stores)
 		for _, name in { "p", "s" } do
@@ -168,6 +170,7 @@ function Handoff._fetch(self: any, player: any): any
 			return {
 				p = if type(v.p) == "table" then v.p else nil,
 				s = if type(v.s) == "table" then v.s else nil,
+				o = if v.o == true then true else nil,
 			}
 		end
 	end

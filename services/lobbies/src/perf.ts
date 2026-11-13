@@ -40,6 +40,18 @@ export interface PerfReport {
 	handoffSent: number;
 	starsLost: number;
 	starsLostAmount: number;
+	// Stars payouts (2026-11-13): made, owed because their write failed, owed ones stored later, owed
+	// ones kept in MemoryStore for the next server; writes to Purchases records, failed, skipped (nothing
+	// to change), the most to one record, and Roblox refusing requests for its limits
+	payouts: number;
+	owedNew: number;
+	owedPaid: number;
+	owedKept: number;
+	writes: number;
+	writeFails: number;
+	writesSkipped: number;
+	writesMaxKey: number;
+	dsThrottled: number;
 }
 
 const WORD_RE = /^[0-9A-Za-z_.:-]{1,32}$/;
@@ -81,6 +93,15 @@ export function parseReport(v: unknown): PerfReport {
 		handoffSent: int(o.handoff_sent ?? 0, "perf.handoff_sent", 0, 1e6),
 		starsLost: int(o.stars_lost ?? 0, "perf.stars_lost", 0, 1e6),
 		starsLostAmount: int(o.stars_lost_amount ?? 0, "perf.stars_lost_amount", 0, 1e9),
+		payouts: int(o.payouts ?? 0, "perf.payouts", 0, 1e6),
+		owedNew: int(o.owed_new ?? 0, "perf.owed_new", 0, 1e6),
+		owedPaid: int(o.owed_paid ?? 0, "perf.owed_paid", 0, 1e6),
+		owedKept: int(o.owed_kept ?? 0, "perf.owed_kept", 0, 1e6),
+		writes: int(o.writes ?? 0, "perf.writes", 0, 1e7),
+		writeFails: int(o.write_fails ?? 0, "perf.write_fails", 0, 1e7),
+		writesSkipped: int(o.writes_skipped ?? 0, "perf.writes_skipped", 0, 1e7),
+		writesMaxKey: int(o.writes_max_key ?? 0, "perf.writes_max_key", 0, 1e6),
+		dsThrottled: int(o.ds_throttled ?? 0, "perf.ds_throttled", 0, 1e7),
 	};
 }
 
@@ -107,6 +128,24 @@ export interface PerfSample {
 	// the counts below summed over the servers' latest minutes (absent in samples before 2026-11-03)
 	handoff?: HandoffCounts;
 	starsLost?: { payouts: number; stars: number };
+	// (absent before 2026-11-13)
+	payouts?: PayoutCounts;
+	writes?: WriteCounts;
+}
+
+export interface PayoutCounts {
+	made: number;
+	owedNew: number;
+	owedPaid: number;
+	owedKept: number;
+}
+
+export interface WriteCounts {
+	writes: number;
+	fails: number;
+	skipped: number;
+	throttled: number;
+	maxKey: number; // the most writes to one record on any one server
 }
 
 export interface HandoffCounts {
@@ -165,6 +204,8 @@ export class Perf {
 		bands: Record<string, Record<string, number>>;
 		handoff: HandoffCounts;
 		starsLost: { payouts: number; stars: number };
+		payouts: PayoutCounts;
+		writes: WriteCounts;
 		slowest: (PerfReport & { job: string })[];
 	} {
 		const live = this.live();
@@ -175,10 +216,10 @@ export class Perf {
 			byRole[r.role]++;
 			bands[r.role][fpsBand(r.fps)]++;
 		}
-		const { handoff, starsLost } = totals(live.map(([, r]) => r));
+		const { handoff, starsLost, payouts, writes } = totals(live.map(([, r]) => r));
 		live.sort((a, b) => a[1].fps - b[1].fps);
 		const slowest = live.slice(0, top).map(([job, r]) => ({ job: job.slice(0, 8), ...r }));
-		return { servers: live.length, byRole, bands, handoff, starsLost, slowest };
+		return { servers: live.length, byRole, bands, handoff, starsLost, payouts, writes, slowest };
 	}
 
 	/** One history point (main.ts: every minute). */
@@ -211,10 +252,17 @@ export class Perf {
 	}
 }
 
-/** The servers' latest minutes added up: hand-offs and lost Stars. */
-function totals(reports: PerfReport[]): { handoff: HandoffCounts; starsLost: { payouts: number; stars: number } } {
+/** The servers' latest minutes added up: hand-offs, Stars payouts and writes. */
+function totals(reports: PerfReport[]): {
+	handoff: HandoffCounts;
+	starsLost: { payouts: number; stars: number };
+	payouts: PayoutCounts;
+	writes: WriteCounts;
+} {
 	const handoff: HandoffCounts = { hits: 0, misses: 0, none: 0, sent: 0 };
 	const starsLost = { payouts: 0, stars: 0 };
+	const payouts: PayoutCounts = { made: 0, owedNew: 0, owedPaid: 0, owedKept: 0 };
+	const writes: WriteCounts = { writes: 0, fails: 0, skipped: 0, throttled: 0, maxKey: 0 };
 	for (const r of reports) {
 		handoff.hits += r.handoffHits;
 		handoff.misses += r.handoffMisses;
@@ -222,8 +270,17 @@ function totals(reports: PerfReport[]): { handoff: HandoffCounts; starsLost: { p
 		handoff.sent += r.handoffSent;
 		starsLost.payouts += r.starsLost;
 		starsLost.stars += r.starsLostAmount;
+		payouts.made += r.payouts;
+		payouts.owedNew += r.owedNew;
+		payouts.owedPaid += r.owedPaid;
+		payouts.owedKept += r.owedKept;
+		writes.writes += r.writes;
+		writes.fails += r.writeFails;
+		writes.skipped += r.writesSkipped;
+		writes.throttled += r.dsThrottled;
+		writes.maxKey = Math.max(writes.maxKey, r.writesMaxKey);
 	}
-	return { handoff, starsLost };
+	return { handoff, starsLost, payouts, writes };
 }
 
 /** A slow report as one log line. */

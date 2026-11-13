@@ -118,6 +118,7 @@ local id = "id-3"
 
 -- A leaves: the settings part comes first (SettingsStore.release), the record later (Purchases.settle)
 from:part(A, "s", { ui = { ratio = 0.4 } })
+from:part(A, "o", nil) -- (no Stars owed)
 expect(from:leaving(A), "leaving on a stamped teleport")
 expect(mem_writes == 0, "nothing is written while a part is missing")
 spawn(function()
@@ -220,8 +221,12 @@ from:stamp({ G }, nil)
 from:leaving(G)
 from:part(G, "p", { owned = big })
 from:part(G, "s", { ui = { ratio = 0.5 } })
+from:part(G, "o", true)
 run(t + 1)
-expect(mem.u13 ~= nil and mem.u13.p == nil and mem.u13.s ~= nil, "a record too big is left out; the settings still go")
+expect(
+	mem.u13 ~= nil and mem.u13.p == nil and mem.u13.s ~= nil and mem.u13.o == true,
+	"a record too big is left out; the settings and the owed flag still go"
+)
 
 -- MemoryStore unavailable: no ids, nothing read
 local off = new_handoff(nil)
@@ -294,7 +299,8 @@ run(t + 3)
 expect(type(settled) == "table" and settled.stars == 540, "then hands on the record with the payout")
 hold = 0
 
--- a write that failed: what this server holds isn't sure, so nothing is handed on
+-- a write that failed: what this server holds isn't sure, so nothing is handed on (the payout is owed:
+-- tests/owed_stars.luau)
 refuse = true
 local ok_pay
 spawn(function()
@@ -302,11 +308,7 @@ spawn(function()
 end)
 run(t + 1)
 refuse = false
-expect(ok_pay == false and Purchases.lost.payouts == 1 and Purchases.lost.stars == 60, "a lost payout is counted")
-expect(
-	warned[1] == "[Purchases] match Stars lost after every retry (TooManyRequests)",
-	"and warned in the same words each time: " .. tostring(warned[1])
-)
+expect(ok_pay == true and Purchases.stars(P) == 600 and #warned == 0, "a payout the store refused is owed, not lost")
 settled = "unset"
 spawn(function()
 	settled = Purchases.settle(P, 25)
@@ -321,7 +323,7 @@ spawn(function()
 	settled = Purchases.settle(P, 25)
 end)
 run(t + 1)
-expect(type(settled) == "table" and settled.stars == 541, "a write that landed makes it sure again")
+expect(type(settled) == "table" and settled.stars == 601, "a write that landed (with the owed 60) makes it sure again")
 
 -- no handoff: the store is read as before
 local Q = { UserId = 43 }

@@ -1261,6 +1261,12 @@ end
 --- Seconds after a "Failed to load sound" before looking at which of ours never loaded (one that is
 --- merely slow has loaded by then).
 AudioDirector.FAILURE_CHECK_S = 4.0
+--- Ours that never loaded are asked for once more this long after (2026-11-13: since Nov 10 Roblox
+--- answers "Requester does not have permission for Asset" for every sound of ours in ~0.1% of
+--- sessions, though the game and the sounds have the same owner; a session that hit it stayed
+--- silent), and RETRY_CHECK_S after that one warning says whether they all came.
+AudioDirector.RETRY_S = 20.0
+AudioDirector.RETRY_CHECK_S = 10.0
 local _named_fail: { [string]: boolean } = {}
 local _foreign_reported = false
 
@@ -1298,6 +1304,12 @@ function AudioDirector._on_load_failure(self: any, msg: string)
 				end
 			end
 		end
+		if ours > 0 and not self._retried then
+			self._retried = true
+			task.delay(AudioDirector.RETRY_S, function()
+				self:_retry_unloaded()
+			end)
+		end
 		if ours == 0 and not _foreign_reported then
 			_foreign_reported = true
 			local ids = {}
@@ -1313,6 +1325,40 @@ function AudioDirector._on_load_failure(self: any, msg: string)
 			)
 		end
 		self._fail_ids = {}
+	end)
+end
+
+--- Once a session: every sound of ours that never loaded is asked for again (its SoundId set anew),
+--- and a warning says how that went (the error report counts the two).
+function AudioDirector._retry_unloaded(self: any)
+	local root = self._root
+	if root == nil or root.Parent == nil then
+		return
+	end
+	local again = {}
+	for _, s in root:GetDescendants() do
+		if s:IsA("Sound") and s.SoundId ~= "" and not s.IsLoaded then
+			local id = s.SoundId
+			s.SoundId = ""
+			s.SoundId = id
+			table.insert(again, s)
+		end
+	end
+	if #again == 0 then
+		return
+	end
+	task.delay(AudioDirector.RETRY_CHECK_S, function()
+		local still = 0
+		for _, s in again do
+			if s.Parent ~= nil and not s.IsLoaded then
+				still += 1
+			end
+		end
+		if still == 0 then
+			warn("[Audio] every sound of ours loaded on a second try")
+		else
+			warn("[Audio] sounds of ours still not loaded after a second try")
+		end
 	end)
 end
 

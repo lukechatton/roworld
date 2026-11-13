@@ -108,3 +108,16 @@ test("hand-offs and lost Stars: the servers' latest minutes added up, in the sum
 	assert.throws(() => parseReport(wire({ handoff_hits: -1 })), Invalid);
 	assert.throws(() => parseReport(wire({ stars_lost: 0.5 })), Invalid);
 });
+
+test("payouts and writes: added up across servers; the most writes to one record is the largest", () => {
+	const p = new Perf(() => 100);
+	p.report("a", parseReport(wire({ payouts: 50, owed_new: 4, owed_paid: 1, owed_kept: 0, writes: 70, write_fails: 4, writes_skipped: 9, writes_max_key: 3, ds_throttled: 12 })));
+	p.report("b", parseReport(wire({ payouts: 10, owed_paid: 2, owed_kept: 1, writes: 15, writes_max_key: 7 })));
+	const s = p.summary();
+	assert.deepEqual(s.payouts, { made: 60, owedNew: 4, owedPaid: 3, owedKept: 1 });
+	assert.deepEqual(s.writes, { writes: 85, fails: 4, skipped: 9, throttled: 12, maxKey: 7 });
+	const smp = p.sample();
+	assert.deepEqual(smp.payouts, s.payouts);
+	assert.deepEqual(smp.writes, s.writes);
+	assert.throws(() => parseReport(wire({ writes: -2 })), Invalid);
+});

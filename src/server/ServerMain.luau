@@ -1346,6 +1346,10 @@ function ServerMain.start()
 		policy_known[player] = true
 		send(player, OP.INVENTORY, inventory_of(player))
 	end
+	local owed_map: any = nil
+	pcall(function()
+		owed_map = game:GetService("MemoryStoreService"):GetHashMap("owed_stars_v1")
+	end)
 	-- Robux purchases: a receipt is a stored credit before Roblox hears it was granted
 	-- (Studio playtests write the real DataStores: their test credits go to a store of their own)
 	local store_name = Purchases.STORE .. (if RunService:IsStudio() then "_studio" else "")
@@ -1411,10 +1415,13 @@ function ServerMain.start()
 		wait = task.wait,
 		log = print,
 		warn = warn,
+		spawn = task.spawn,
 		-- teleported here by a server of ours: the record it held when they left
 		arrived = function(player: Player): any
 			return handoff:arrived(player)
 		end,
+		-- Stars owed to players who left before their payout could be stored (Purchases.leave_owed)
+		owed_map = owed_map,
 		-- (Studio: the starter pack is offered before its product exists; the prompt is a test)
 		studio = RunService:IsStudio(),
 	})
@@ -1526,9 +1533,11 @@ function ServerMain.start()
 		General.release(player)
 		Rewards.release(player)
 		if handoff:leaving(player) then
-			-- on one of our teleports: their record goes along once this server's writes have landed
+			-- on one of our teleports: their record goes along once this server's writes have landed,
+			-- and Stars still owed to them are kept for the next server (which the handoff tells)
 			task.spawn(function()
 				handoff:part(player, "p", Purchases.settle(player, Handoff.PART_WAIT_S - 5))
+				handoff:part(player, "o", Purchases.leave_owed(player) or nil)
 				Purchases.release(player)
 			end)
 		else
@@ -1577,7 +1586,7 @@ function ServerMain.start()
 	local perf = ServerPerf.new()
 	local StatsService = game:GetService("Stats")
 	--- the counts at the last report (each report has the window's)
-	local counted = { hits = 0, misses = 0, none = 0, sent = 0, lost = 0, lost_stars = 0 }
+	local counted = { hits = 0, misses = 0, none = 0, sent = 0, throttled = 0 }
 	--- What this server runs, for its ServerPerf report.
 	local function perf_context(): { [string]: any }
 		local ctx: { [string]: any } = {
@@ -1594,11 +1603,23 @@ function ServerMain.start()
 			handoff_misses = handoff.misses - counted.misses,
 			handoff_none = handoff.none - counted.none,
 			handoff_sent = handoff.sent - counted.sent,
-			stars_lost = Purchases.lost.payouts - counted.lost,
-			stars_lost_amount = Purchases.lost.stars - counted.lost_stars,
+			-- the Purchases store: Roblox refusing its requests for its limits (DsGate)
+			ds_throttled = (purchase_store.throttled or 0) - counted.throttled,
 		}
 		counted.hits, counted.misses, counted.none, counted.sent = handoff.hits, handoff.misses, handoff.none, handoff.sent
-		counted.lost, counted.lost_stars = Purchases.lost.payouts, Purchases.lost.stars
+		counted.throttled = purchase_store.throttled or 0
+		-- Stars payouts (stored late, owed, kept for later, lost) and writes to Purchases records
+		local ps = Purchases.take_stats()
+		ctx.payouts = ps.payouts
+		ctx.owed_new = ps.owed_new
+		ctx.owed_paid = ps.owed_paid
+		ctx.owed_kept = ps.owed_kept
+		ctx.stars_lost = ps.lost
+		ctx.stars_lost_amount = ps.lost_stars
+		ctx.writes = ps.writes
+		ctx.write_fails = ps.write_fails
+		ctx.writes_skipped = ps.skipped
+		ctx.writes_max_key = ps.max_key
 		local sim = server:sim()
 		if sim ~= nil then
 			ctx.minute = sim.tick * MatchServer.TICK_SEC / 60
