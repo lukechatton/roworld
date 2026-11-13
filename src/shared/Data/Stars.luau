@@ -40,6 +40,10 @@ Stars.MODE_MULT = { public = 1.0, solo0 = 0.4, solo1 = 0.7, solo2 = 1.0 }
 --- A solo match's result is the client's word: its Stars never exceed this much per real minute
 --- (the server's clock) plus the floor. Generous for an honest fast win, a ceiling for a made-up one.
 Stars.SOLO_CAP_PER_MIN = 220
+--- The floor in that cap grows over this many real minutes (2026-11-13): paid in full from the start, a
+--- client could start a match and claim its result at once, again and again, for the floor each time
+--- (up to ~12,000 Stars a minute at the 2-a-second request cap).
+Stars.SOLO_FLOOR_MIN = 1.0
 --- Sanity bounds for a result.
 Stars.MAX_MINUTES = 240
 Stars.MAX_KILLS = 200
@@ -120,7 +124,8 @@ end
 
 --- The most a solo match that really lasted `real_minutes` may pay (before 2x Stars).
 function Stars.solo_cap(real_minutes: number): number
-	return Stars.FLOOR + math.floor(Stars.SOLO_CAP_PER_MIN * math.max(real_minutes, 0))
+	local m = math.max(real_minutes, 0)
+	return math.floor(Stars.FLOOR * math.min(m / Stars.SOLO_FLOOR_MIN, 1) + Stars.SOLO_CAP_PER_MIN * m)
 end
 
 local function num(v: any, lo: number, hi: number): number

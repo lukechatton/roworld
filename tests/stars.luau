@@ -96,7 +96,11 @@ do
 	expect(j.left and not j.won, "a player who left did not win")
 	local n = Stars.sanitize(nil, 5)
 	expect(not n.spawned and Stars.payout(n).total == 0, "no report: nothing")
-	expect(Stars.solo_cap(10) == 100 + 2200 and Stars.solo_cap(-3) == 100, "the solo cap grows with real time only")
+	expect(Stars.solo_cap(10) == 100 + 2200 and Stars.solo_cap(-3) == 0, "the solo cap grows with real time only")
+	expect(
+		Stars.solo_cap(0) == 0 and Stars.solo_cap(0.5) == 50 + 110 and Stars.solo_cap(1) == 100 + 220,
+		"its floor grows over the first real minute"
+	)
 end
 
 -- =============================================================================================
@@ -365,7 +369,7 @@ do
 	-- solo: nothing without a started match
 	expect(Rewards.solo_result(P, win) == 0, "a solo result without a started match pays nothing")
 	Rewards.solo_started(P, "solo2")
-	expect(Rewards.solo_result(P, win) <= 100, "claimed at once: there was no time to earn it")
+	expect(Rewards.solo_result(P, win) == 0, "claimed at once: there was no time to earn it")
 	local s0 = Purchases.stars(P)
 	Rewards.solo_started(P, "solo2")
 	clock += 20 * 60
@@ -388,6 +392,44 @@ do
 		sum += l[2]
 	end
 	expect(sum == last.total and last.total == got, "a capped payout's lines still add up")
+	-- starting a match and claiming its result at once, again and again (2026-11-13: up to ~12,000
+	-- Stars a minute, and two writes a second to the player's record)
+	local farm0 = Purchases.stars(P)
+	local farmed, paid_n = 0, 0
+	for _ = 1, 120 do
+		clock += 0.5
+		Rewards.solo_started(P, "solo2")
+		local s = Rewards.solo_result(P, { spawned = true, left = false, minutes = 0.2, shares = 0, kills = 0, place = 9, field = 60 })
+		farmed += s
+		if s > 0 then
+			paid_n += 1
+		end
+	end
+	expect(
+		farmed <= Stars.solo_cap(1) and Purchases.stars(P) - farm0 == farmed,
+		"a minute of starting and claiming at once pays at most a real minute's cap (" .. farmed .. ")"
+	)
+	expect(paid_n <= 60 / Rewards.SOLO_GAP_S, "and is paid at most once every " .. Rewards.SOLO_GAP_S .. " s (" .. paid_n .. ")")
+	-- a second life's result soon after the first is not paid, and its time counts toward the next
+	clock += 600
+	Rewards.solo_started(P, "solo2")
+	clock += 120
+	local life1 = Rewards.solo_result(P, win)
+	clock += 5
+	local life2 = Rewards.solo_result(P, win)
+	clock += 60
+	local life3 = Rewards.solo_result(P, fake)
+	expect(life1 > 0 and life2 == 0, "a result 5 s after the last payout: not paid")
+	expect(
+		life3 > Stars.solo_cap(1) - 5 and life3 <= Stars.solo_cap(65 / 60),
+		"the next is paid for the time since the last payout (65 s): " .. life3
+	)
+	-- an honest short match still earns its share of the floor
+	clock += 600
+	Rewards.solo_started(P, "solo2")
+	clock += 30
+	local short = Rewards.solo_result(P, { spawned = true, left = false, minutes = 0.5, shares = 0, kills = 0, place = 30, field = 60 })
+	expect(short >= 100 and short <= Stars.solo_cap(0.5), "a 30-second match lost: its floor and time are paid (" .. short .. ")")
 	-- one match, a bounded number of results
 	Rewards.solo_started(P, "solo2")
 	local n = 0

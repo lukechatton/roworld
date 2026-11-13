@@ -32,11 +32,16 @@ local Rewards = {}
 Rewards.MAX_SOLO_PAYOUTS = 4
 --- Slack on the real time a solo result may claim (the report's trip, the clock's grain), minutes.
 Rewards.SLACK_MIN = 0.25
+--- Seconds after a player's last solo payout (any match) before the next can be paid (2026-11-13): a
+--- result sooner than that is not paid, and its time counts toward the next. Starting a match and
+--- claiming its result at once, again and again, wrote to the player's record twice a second.
+Rewards.SOLO_GAP_S = 10
 
 type Solo = { mode: string, paid_at: number, payouts: number }
 
 local deps: { [string]: any } = {}
 local solo: { [any]: Solo } = {}
+local solo_paid: { [any]: number } = {} -- (when each player's last solo payout was made)
 
 function Rewards.configure(d: { [string]: any })
 	for k, v in d do
@@ -47,6 +52,7 @@ end
 --- Tests: forget everyone.
 function Rewards.reset()
 	table.clear(solo)
+	table.clear(solo_paid)
 end
 
 local function now(): number
@@ -109,6 +115,10 @@ function Rewards.solo_result(player: any, report: any): number
 		return 0
 	end
 	local t = now()
+	local last = solo_paid[player]
+	if last ~= nil and t - last < Rewards.SOLO_GAP_S then
+		return 0 -- (too soon after the last payout: not paid; its time counts toward the next)
+	end
 	local real = math.max(0, (t - m.paid_at) / 60)
 	local r = Stars.sanitize(report, real + Rewards.SLACK_MIN)
 	m.payouts += 1
@@ -129,11 +139,15 @@ function Rewards.solo_result(player: any, report: any): number
 		end
 	end
 	lines, total = with_double(player, lines, total)
+	if total > 0 then
+		solo_paid[player] = t
+	end
 	return deliver(player, lines, total, m.mode)
 end
 
 function Rewards.release(player: any)
 	solo[player] = nil
+	solo_paid[player] = nil
 end
 
 return Rewards
